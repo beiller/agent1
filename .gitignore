@@ -1,0 +1,6 @@
+venv
+llama.cpp
+__pycache__
+nohup.out
+.env
+conversations/*.txt
