@@ -40,6 +40,9 @@ import logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger()
 
+
+CURRENT_MODEL = "Qwen_Qwen3.5-27B-Q4_1"
+
 # ---------------------------------------------------------------------------
 # Types – Chat Completions API
 # ---------------------------------------------------------------------------
@@ -243,8 +246,7 @@ SKILLS_DIR = ROOT_DIR / "skills"
 async def stream_chat_completion(
     base_url: str,
     messages: list[Message],
-    tools: list[Tool],
-    model: str
+    tools: list[Tool]
 ) -> AsyncIterator[ChatCompletionChunk]:
     """Send a streaming chat completion request, yielding SSE chunks asynchronously."""
     system_content = SYSTEM_MD.read_text() if SYSTEM_MD.exists() else ""
@@ -252,7 +254,7 @@ async def stream_chat_completion(
         m for m in messages if m.get("role") != "system"
     ]
     body: ChatCompletionRequest = {
-        "model": model,
+        "model": CURRENT_MODEL,
         "messages": msgs,
         "tools": tools,
         "tool_choice": "auto",
@@ -397,8 +399,7 @@ def build_tools() -> tuple[list[Tool], dict[str, ToolHandler]]:
 async def run_tool_loop(
     base_url: str,
     user_id: UserID,
-    messages: List[Message],
-    model: str
+    messages: List[Message]
 ) -> str:
     """Stream messages, handle tool calls in a loop, return final text."""
     max_calls = 60
@@ -408,7 +409,7 @@ async def run_tool_loop(
 
     while True:
         tools, registry = build_tools()
-        chunks = stream_chat_completion(base_url, messages, tools, model)
+        chunks = stream_chat_completion(base_url, messages, tools)
 
         assistant_msg = await consume_stream(chunks, user_id, emit)
         emit(user_id, "assistant", "", False)
@@ -440,8 +441,7 @@ async def handle_message(
     user_input: str,
     base_url: str,
     user_id: UserID, 
-    session_id: SessionID,
-    model: str
+    session_id: SessionID
 ) -> None:
     """Handle a user message event: append it, run the tool loop, emit the reply."""
     messages = get_user_messages(user_id)
@@ -449,7 +449,7 @@ async def handle_message(
     write_conversation(session_id, messages)
 
     reply = await run_tool_loop( # modifies messages
-        base_url, user_id, messages, model
+        base_url, user_id, messages
     )
     
     if approximate_token_count(json.dumps(messages)) > 25000:
@@ -532,7 +532,10 @@ def load_model(model_name: str) -> str:
     Returns:
         JSON string with success status and details
     """
+    global CURRENT_MODEL
+    unload_model(CURRENT_MODEL)
     base_url = os.getenv("LLAMA_BASE_URL")
+    CURRENT_MODEL = model_name 
     try:
         # llama-server router mode load endpoint
         url = f"{base_url}/models/load"
@@ -709,7 +712,6 @@ def init_registry() -> Tuple[Callable[[UserID], list[Message]], Callable[[UserID
 
 get_user_messages, set_user_messages = init_registry()
 
-
 async def main(
     on_ready: Callable = None,
     resume: bool = False
@@ -732,8 +734,7 @@ async def main(
 
     session_resumed = False
 
-    model = "Qwen_Qwen3.5-27B-Q4_1"
-    load_model(model)
+    load_model(CURRENT_MODEL)
 
     try:
         while True:
@@ -759,7 +760,7 @@ async def main(
                 continue
             try:
                 await handle_message(
-                    user_input, base_url, user_id, session_id, model
+                    user_input, base_url, user_id, session_id
                 )
             except asyncio.CancelledError:
                 print("Message handling cancelled", file=sys.stderr)
