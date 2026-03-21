@@ -26,6 +26,7 @@ from typing import AsyncIterator, Callable, get_type_hints, Protocol, TypedDict
 from vector_search import vector_search
 import random
 import string
+from datetime import datetime
 
 # Load environment variables from .env file
 try:
@@ -437,7 +438,7 @@ async def handle_message(
     """Handle a user message event: append it, run the tool loop, emit the reply."""
     messages = get_user_messages(user_id)
     messages.append(make_user_message(user_input))
-    write_conversation("conversations/"+session_id+".txt", messages)
+    write_conversation(session_id, messages)
 
     reply = await run_tool_loop( # modifies messages
         base_url, user_id, messages
@@ -445,8 +446,7 @@ async def handle_message(
     
     if approximate_token_count(json.dumps(messages)) > 25000:
         logger.info("Compacting conversation")
-        filename = 'conversations/'+generate_filename()+".txt"
-        write_conversation(filename, messages)
+        archive_conversation(session_id, messages)
         new_messages = [
             {"role": "assistant", "content": f"The previous conversation was archived to {filename}"},
             *messages[-4:],
@@ -454,7 +454,7 @@ async def handle_message(
         messages.clear()
         messages.extend(new_messages)
 
-    write_conversation("conversations/"+session_id+".txt", messages)
+    write_conversation(session_id, messages)
 
 
 
@@ -508,14 +508,13 @@ def load_skills(
 # ---------------------------------------------------------------------------
 # Tool implementations
 # ---------------------------------------------------------------------------
-from datetime import datetime
-
-def generate_filename():
-    """Converts current date/time to a filename-safe string."""
-    return datetime.now().strftime("%Y%m%d_%H%M%S")
 
 
-def write_conversation(filename: str, messages: List[Message]):
+
+CONVERSATION_DIR = './conversations/'
+
+def archive_conversation(session_id: str, messages: List[Message]):
+    filename = datetime.now().strftime("%Y%m%d_%H%M%S") + "_" + session_id + ".txt"
     archive_text = ""
     for message in messages:
         if message['role'] in ['tool', ] : continue
@@ -524,8 +523,25 @@ def write_conversation(filename: str, messages: List[Message]):
         if 'tool_calls' in message and message['tool_calls']: archive_text += json.dumps(message['tool_calls']) + "\n"
         archive_text += "\n"
 
-    with open(filename, 'w') as fh:
+    with open(CONVERSATION_DIR+filename, 'w') as fh:
         fh.write(archive_text)
+
+
+def write_conversation(session_id: str, messages: List[Message]):
+    with open(CONVERSATION_DIR+session_id+'.json', 'w') as fh:
+        json.dump(messages, fh)
+
+
+def read_conversation(session_id: str) -> List[Message]:
+    with open(CONVERSATION_DIR+session_id+'.json') as fh:
+        return json.load(fh)
+
+
+def get_last_conversation_session_id() -> SessionID:
+    files = [f for f in pathlib.Path(CONVERSATION_DIR).iterdir() if f.is_file() and f.name.endswith(".json")]
+    session_id: SessionID = max(files, key=lambda f: f.stat().st_mtime).name.split('/')[-1].split('.')[0]
+    logger.info("Resuming session: " + session_id)
+    return session_id
 
 
 def run_bash(*, command: str) -> str:
@@ -578,20 +594,22 @@ async def get_reponse() -> Tuple[str, str, str, bool]:
 #  USER DATABASE
 UserID = str
 SessionID = str
-def init_registry() -> Callable[[UserID], list[Message]]:
+def init_registry() -> Tuple[Callable[[UserID], list[Message]], Callable[[UserID, list[Messages]], None]]:
     user_registry: Dict[UserID, list[Message]] = {}
 
     def get_user_messages(user_id: UserID):
         if user_id not in user_registry: user_registry[user_id] = []
         return user_registry.get(user_id)
-    
-    return get_user_messages
+    def set_user_messages(user_id: UserID, messages: List[Message]):
+        user_registry[user_id] = messages
+    return get_user_messages, set_user_messages
 
-get_user_messages: Callable[[UserID], list[Message]] = init_registry()
+get_user_messages, set_user_messages = init_registry()
 
 
 async def main(
-    on_ready: Callable = None
+    on_ready: Callable = None,
+    resume: bool = False
 ) -> None:
     """Run the conversation loop, using the provided I/O callbacks."""
     _, skill_registry = load_skills(SKILLS_DIR)
@@ -605,6 +623,11 @@ async def main(
     #emit("info", f"Chat (Ctrl-C to cancel, twice to quit) - URL: {base_url}")
 
     session_id = ''.join(random.choices(string.ascii_lowercase + string.digits, k=8))
+    if resume:
+        session_id = get_last_conversation_session_id()
+        #set_user_messages(read_conversation(session_id))
+
+    session_resumed = False
 
     try:
         while True:
@@ -618,6 +641,12 @@ async def main(
             except KeyboardInterrupt:
                 print(file=sys.stderr)
                 break
+            
+            # load the conversation up it memory once
+            if resume and not session_resumed:
+                set_user_messages(user_id, read_conversation(session_id))
+                session_resumed = True
+
             if user_input is None:
                 break
             if not user_input.strip():
@@ -637,7 +666,7 @@ async def main(
         raise
 
 
-async def async_main(client_type):
+async def async_main(client_type: str, resume: bool = False):
     # Import client module based on command line argument
     if client_type == "terminal":
         import terminal
@@ -650,7 +679,7 @@ async def async_main(client_type):
     
     # Create tasks for proper cancellation
     init_task = asyncio.create_task(terminal.init(queue_query, get_reponse))
-    main_task = asyncio.create_task(main(on_ready=terminal.on_ready))
+    main_task = asyncio.create_task(main(on_ready=terminal.on_ready, resume=resume))
     
     try:
         await asyncio.gather(init_task, main_task)
@@ -685,6 +714,8 @@ if __name__ == "__main__":
     import sys
     if len(sys.argv) > 1:
         config["client"] = sys.argv[1]
-
+    resume: bool = False
+    if len(sys.argv) > 2:
+        resume = sys.argv[2] == "true"
     # Run the async function with proper cancellation handling
-    asyncio.run(async_main(config.get("client", "terminal")))
+    asyncio.run(async_main(config.get("client", "terminal"), resume))

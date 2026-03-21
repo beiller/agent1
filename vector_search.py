@@ -18,20 +18,43 @@ def create_store():
 def preprocess(text: str) -> str: 
     return re.sub(r'[^\w\u2000-\u3300\ud800-\udfff]+', ' ', text).replace("  ", " ").replace("  ", " ").replace("  ", " ")
 
-def add(store, text, doc_id, window_size=50, step=25):
-    """Add document to store using sliding window approach - optimized for speed"""
+def add(store, text, doc_id, max_chunk_size=300):
+    """Add document to store using paragraph-aware chunking"""
     if len(text) < 10:
         return
 
     chunks = []
     positions = []
     
-    # Create MUCH larger windows with minimal overlap (1000 chars, 950 step = ~5% overlap)
-    for i in range(0, max(0, len(text) - window_size + 1), step):
-        chunk = text[i:i+window_size]
-        if len(chunk.strip()) > 20:
-            chunks.append(chunk)
-            positions.append((i, i + min(window_size, len(text) - i)))
+    # Split by paragraphs first (double newlines)
+    paragraphs = text.split('\n\n')
+    
+    for para in paragraphs:
+        # If paragraph is already small enough, use it as-is
+        if len(para.strip()) <= max_chunk_size and len(para.strip()) > 20:
+            chunks.append(para.strip())
+            # Find position in original text (approximate)
+            start = text.find(para.strip())
+            positions.append((start, start + len(para.strip())))
+        else:
+            # Split large paragraphs by sentences or lines
+            current_chunk = ""
+            chunk_start = 0
+            
+            for line in para.split('\n'):
+                if len(current_chunk) + len(line) > max_chunk_size:
+                    if current_chunk.strip() and len(current_chunk.strip()) > 20:
+                        chunks.append(current_chunk.strip())
+                        positions.append((chunk_start, chunk_start + len(current_chunk)))
+                    current_chunk = line
+                    chunk_start = para.find(line, chunk_start)
+                else:
+                    current_chunk += "\n" + line
+            
+            # Don't forget the last chunk
+            if current_chunk.strip() and len(current_chunk.strip()) > 20:
+                chunks.append(current_chunk.strip())
+                positions.append((chunk_start, chunk_start + len(current_chunk)))
     
     if not chunks:
         return
@@ -163,7 +186,7 @@ def search_database(db, keyword: str, context_window: int, top_k: int, top_j_per
 def vector_search(keyword_to_search: str, context_size: int = 1000, top_k: int = 3, top_j_per_doc: int = 2) -> str:
     """Search for previous conversation history about a conversation topic. 
     
-    Provide a `keyword_to_search`. 
+    Provide a `keyword_to_search`. This is a string that represents the conversation words that may be in chat history. Only provide words that will contextually fit what the user is asking.
 
     Optionally use `context_size` if you need more information and you were not successfull at first. Use a larger size up to 1000+
     
