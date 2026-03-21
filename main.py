@@ -483,16 +483,13 @@ async def handle_message(
 
 
 def load_skills(
-    skills_dir: str | pathlib.Path,
+    skills_dir: str | pathlib.Path
 ) -> tuple[list[Tool], dict[str, ToolHandler]]:
     """Scan skills_dir for .md files and return (tools, registry) for each."""
     skills_dir = pathlib.Path(skills_dir)
-    tools: list[Tool] = []
-    registry: dict[str, ToolHandler] = {
-        "run_bash": run_bash,
-        "vector_search": vector_search,
-        "load_model": load_model,}
 
+    tools = []
+    registry = {}
     if not skills_dir.is_dir():
         return tools, registry
 
@@ -728,9 +725,6 @@ async def main(
     resume: bool = False
 ) -> None:
     """Run the conversation loop, using the provided I/O callbacks."""
-    _, skill_registry = load_skills(SKILLS_DIR)
-    #for name in skill_registry: emit("skill", name)
-
     # Load from environment variables if not provided
     base_url = os.getenv("LLAMA_BASE_URL")
     
