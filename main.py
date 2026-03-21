@@ -261,8 +261,10 @@ async def stream_chat_completion(
 ) -> AsyncIterator[ChatCompletionChunk]:
     """Send a streaming chat completion request, yielding SSE chunks asynchronously."""
     system_content = SYSTEM_MD.read_text() if SYSTEM_MD.exists() else ""
+    # Strip timestamps before sending to LLM API
     msgs = [make_system_message(system_content)] + [
-        m for m in messages if m.get("role") != "system"
+        {k: v for k, v in m.items() if k != "timestamp"} 
+        for m in messages if m.get("role") != "system"
     ]
     body: ChatCompletionRequest = {
         "model": CURRENT_MODEL,
@@ -431,15 +433,26 @@ async def run_tool_loop(
 
         if not tool_msgs:
             text = assistant_msg.get("content") or ""
-            messages.append({"role": "assistant", "content": text})
+            # Add timestamp when LLM responds
+            assistant_msg_with_ts = {"role": "assistant", "content": text, "timestamp": datetime.now().isoformat()}
+            messages.append(assistant_msg_with_ts)
             return text
 
-        messages.extend(tool_msgs)
+        # Add timestamps to tool result messages
+        tool_msgs_with_ts = []
+        for tm in tool_msgs:
+            tm_copy = tm.copy()
+            tm_copy["timestamp"] = datetime.now().isoformat()
+            tool_msgs_with_ts.append(tm_copy)
+        messages.extend(tool_msgs_with_ts)
+        
         tool_counter += 1
         if tool_counter > max_calls:
             emit(user_id, "info", "too many tool calls, giving up")
             text = assistant_msg.get("content") or ""
-            messages.append({"role": "assistant", "content": text})
+            # Add timestamp when LLM responds
+            assistant_msg_with_ts = {"role": "assistant", "content": text, "timestamp": datetime.now().isoformat()}
+            messages.append(assistant_msg_with_ts)
             return text
 
 
@@ -456,7 +469,10 @@ async def handle_message(
 ) -> None:
     """Handle a user message event: append it, run the tool loop, emit the reply."""
     messages = get_user_messages(user_id)
-    messages.append(make_user_message(user_input))
+    # Add timestamp when user types the message
+    user_msg = make_user_message(user_input)
+    user_msg["timestamp"] = datetime.now().isoformat()
+    messages.append(user_msg)
     write_conversation(session_id, messages)
 
     reply = await run_tool_loop( # modifies messages
@@ -467,7 +483,11 @@ async def handle_message(
         logger.info("Compacting conversation")
         filename = archive_conversation(session_id, messages)
         new_messages = [
-            {"role": "assistant", "content": f"The previous conversation was archived to {filename}"},
+            {
+                "role": "assistant", 
+                "content": f"The previous conversation was archived to {filename}",
+                "timestamp": datetime.now().isoformat()
+            }
             *messages[-4:],
         ]
         messages.clear()
@@ -630,6 +650,7 @@ def archive_conversation(session_id: str, messages: List[Message]):
     archive_text = ""
     for message in messages:
         if message['role'] in ['tool', ] : continue
+        if 'timestamp' in message and message['timestamp']: archive_text += '[' + message['timestamp'] + '] '
         archive_text += message['role'] + ":\n"
         if 'content' in message and message['content']: archive_text += message['content'] + "\n"
         if 'tool_calls' in message and message['tool_calls']: archive_text += json.dumps(message['tool_calls']) + "\n"
