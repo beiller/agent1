@@ -244,6 +244,7 @@ async def stream_chat_completion(
     base_url: str,
     messages: list[Message],
     tools: list[Tool],
+    model: str
 ) -> AsyncIterator[ChatCompletionChunk]:
     """Send a streaming chat completion request, yielding SSE chunks asynchronously."""
     system_content = SYSTEM_MD.read_text() if SYSTEM_MD.exists() else ""
@@ -251,7 +252,7 @@ async def stream_chat_completion(
         m for m in messages if m.get("role") != "system"
     ]
     body: ChatCompletionRequest = {
-        "model": "",
+        "model": model,
         "messages": msgs,
         "tools": tools,
         "tool_choice": "auto",
@@ -377,10 +378,15 @@ def execute_tool_calls(
 
 def build_tools() -> tuple[list[Tool], dict[str, ToolHandler]]:
     """Build the full tools list and registry by reloading skills from disk."""
-    tools: list[Tool] = [tool_from_function(run_bash), tool_from_function(vector_search)]
+    tools: list[Tool] = [tool_from_function(run_bash), tool_from_function(vector_search), 
+                           tool_from_function(load_model), tool_from_function(unload_model), 
+                           tool_from_function(list_models)]
     registry: dict[str, ToolHandler] = {
         "run_bash": run_bash,
-        "vector_search": vector_search
+        "vector_search": vector_search,
+        "load_model": load_model,
+        "unload_model": unload_model,
+        "list_models": list_models,
     }
     skill_tools, skill_registry = load_skills(SKILLS_DIR)
     tools.extend(skill_tools)
@@ -391,7 +397,8 @@ def build_tools() -> tuple[list[Tool], dict[str, ToolHandler]]:
 async def run_tool_loop(
     base_url: str,
     user_id: UserID,
-    messages: List[Message]
+    messages: List[Message],
+    model: str
 ) -> str:
     """Stream messages, handle tool calls in a loop, return final text."""
     max_calls = 60
@@ -401,7 +408,7 @@ async def run_tool_loop(
 
     while True:
         tools, registry = build_tools()
-        chunks = stream_chat_completion(base_url, messages, tools)
+        chunks = stream_chat_completion(base_url, messages, tools, model)
 
         assistant_msg = await consume_stream(chunks, user_id, emit)
         emit(user_id, "assistant", "", False)
@@ -433,7 +440,8 @@ async def handle_message(
     user_input: str,
     base_url: str,
     user_id: UserID, 
-    session_id: SessionID
+    session_id: SessionID,
+    model: str
 ) -> None:
     """Handle a user message event: append it, run the tool loop, emit the reply."""
     messages = get_user_messages(user_id)
@@ -441,12 +449,12 @@ async def handle_message(
     write_conversation(session_id, messages)
 
     reply = await run_tool_loop( # modifies messages
-        base_url, user_id, messages
+        base_url, user_id, messages, model
     )
     
     if approximate_token_count(json.dumps(messages)) > 25000:
         logger.info("Compacting conversation")
-        archive_conversation(session_id, messages)
+        filename = archive_conversation(session_id, messages)
         new_messages = [
             {"role": "assistant", "content": f"The previous conversation was archived to {filename}"},
             *messages[-4:],
@@ -469,7 +477,10 @@ def load_skills(
     """Scan skills_dir for .md files and return (tools, registry) for each."""
     skills_dir = pathlib.Path(skills_dir)
     tools: list[Tool] = []
-    registry: dict[str, ToolHandler] = {}
+    registry: dict[str, ToolHandler] = {
+        "run_bash": run_bash,
+        "vector_search": vector_search,
+        "load_model": load_model,}
 
     if not skills_dir.is_dir():
         return tools, registry
@@ -507,11 +518,101 @@ def load_skills(
 
 # ---------------------------------------------------------------------------
 # Tool implementations
-# ---------------------------------------------------------------------------
-
-
-
 CONVERSATION_DIR = './conversations/'
+
+def load_model(model_name: str) -> str:
+    """Load a specific model into llama-server router mode via its API.
+    
+    Requires llama-server to be running in router mode (started without --model flag).
+    The model must be discoverable via --models-dir or preset configuration.
+    
+    Args:
+        model_name: Name or path of the model to load
+        
+    Returns:
+        JSON string with success status and details
+    """
+    base_url = os.getenv("LLAMA_BASE_URL")
+    try:
+        # llama-server router mode load endpoint
+        url = f"{base_url}/models/load"
+        data = json.dumps({"model": model_name}).encode('utf-8')
+        
+        req = urllib.request.Request(
+            url,
+            data=data,
+            headers={"Content-Type": "application/json"},
+            method="POST"
+        )
+        
+        with urllib.request.urlopen(req, timeout=60) as response:
+            result = json.loads(response.read().decode('utf-8'))
+            return json.dumps({"success": True, "model": model_name, "details": result})
+    except urllib.error.HTTPError as e:
+        error_body = e.read().decode('utf-8') if e.fp else "Unknown error"
+        return json.dumps({"success": False, "http_status": e.code, "error": error_body})
+    except Exception as e:
+        return json.dumps({"success": False, "error": str(e)})
+
+
+def unload_model(model_name: str) -> str:
+    """Unload a specific model from llama-server router mode via its API.
+    
+    Requires llama-server to be running in router mode.
+    
+    Args:
+        model_name: Name or path of the model to unload
+        
+    Returns:
+        JSON string with success status and details
+    """
+    base_url = os.getenv("LLAMA_BASE_URL")
+    try:
+        url = f"{base_url}/models/unload"
+        data = json.dumps({"model": model_name}).encode('utf-8')
+        
+        req = urllib.request.Request(
+            url,
+            data=data,
+            headers={"Content-Type": "application/json"},
+            method="POST"
+        )
+        
+        with urllib.request.urlopen(req, timeout=30) as response:
+            result = json.loads(response.read().decode('utf-8'))
+            return json.dumps({"success": True, "model": model_name, "details": result})
+    except urllib.error.HTTPError as e:
+        error_body = e.read().decode('utf-8') if e.fp else "Unknown error"
+        return json.dumps({"success": False, "http_status": e.code, "error": error_body})
+    except Exception as e:
+        return json.dumps({"success": False, "error": str(e)})
+
+
+def list_models() -> str:
+    """List all available models in llama-server router mode.
+    
+    Requires llama-server to be running in router mode.
+    Returns model names, statuses, and metadata.
+    
+    Returns:
+        JSON string with list of models and their status
+    """
+    base_url = os.getenv("LLAMA_BASE_URL")
+    try:
+        url = f"{base_url}/models"
+        
+        req = urllib.request.Request(
+            url,
+            method="GET"
+        )
+        
+        with urllib.request.urlopen(req, timeout=30) as response:
+            result = json.loads(response.read().decode('utf-8'))
+            return json.dumps(result)
+    except Exception as e:
+        return json.dumps({"error": str(e)})
+
+
 
 def archive_conversation(session_id: str, messages: List[Message]):
     filename = datetime.now().strftime("%Y%m%d_%H%M%S") + "_" + session_id + ".txt"
@@ -525,6 +626,8 @@ def archive_conversation(session_id: str, messages: List[Message]):
 
     with open(CONVERSATION_DIR+filename, 'w') as fh:
         fh.write(archive_text)
+
+    return CONVERSATION_DIR+filename
 
 
 def write_conversation(session_id: str, messages: List[Message]):
@@ -629,6 +732,9 @@ async def main(
 
     session_resumed = False
 
+    model = "Qwen_Qwen3.5-27B-Q4_1"
+    load_model(model)
+
     try:
         while True:
             try:
@@ -653,7 +759,7 @@ async def main(
                 continue
             try:
                 await handle_message(
-                    user_input, base_url, user_id, session_id
+                    user_input, base_url, user_id, session_id, model
                 )
             except asyncio.CancelledError:
                 print("Message handling cancelled", file=sys.stderr)
@@ -719,3 +825,4 @@ if __name__ == "__main__":
         resume = sys.argv[2] == "true"
     # Run the async function with proper cancellation handling
     asyncio.run(async_main(config.get("client", "terminal"), resume))
+
