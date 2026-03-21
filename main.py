@@ -487,7 +487,7 @@ async def handle_message(
                 "role": "assistant", 
                 "content": f"The previous conversation was archived to {filename}",
                 "timestamp": datetime.now().isoformat()
-            }
+            },
             *messages[-4:],
         ]
         messages.clear()
