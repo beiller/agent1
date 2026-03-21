@@ -28,20 +28,33 @@ import random
 import string
 from datetime import datetime
 
-# Load environment variables from .env file
+# Load environment variables with priority order
+# 1. .env.example (defaults)
+# 2. .env (user overrides - if exists)
 try:
     from dotenv import load_dotenv
-    load_dotenv()
+    import os
+    
+    # First load defaults from .env.example
+    load_dotenv(".env.example", override=False)
+    
+    # Then load .env if it exists (overrides .env.example)
+    if os.path.exists(".env"):
+        load_dotenv(".env", override=True)
+    
+    # Set fallback defaults if neither file has them
+    if "LLAMA_BASE_URL" not in os.environ:
+        os.environ["LLAMA_BASE_URL"] = "http://127.0.0.1:8080"
 except ImportError:
-    # If python-dotenv is not installed, continue without it
-    pass
-
+    # If python-dotenv is not installed, use hardcoded defaults
+    import os
+    if "LLAMA_BASE_URL" not in os.environ:
+        os.environ["LLAMA_BASE_URL"] = "http://127.0.0.1:8080"
 import logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger()
 
-
-CURRENT_MODEL = "Qwen_Qwen3.5-27B-Q4_1"
+CURRENT_MODEL = os.environ.get("CURRENT_MODEL", "Qwen_Qwen3.5-27B-Q4_1")
 
 # ---------------------------------------------------------------------------
 # Types – Chat Completions API
