@@ -802,11 +802,11 @@ async def main(
 async def async_main(client_type: str, resume: bool = False):
     # Import client module based on command line argument
     if client_type == "terminal":
-        import terminal
+        from clients import terminal
     elif client_type == "discord_client":
-        import discord_client as terminal
+        from clients import discord_client as terminal
     elif client_type == "irc_client":
-        import irc_client as terminal
+        from clients import irc_client as terminal
     else:
         raise ValueError(f"Unknown client type: {client_type}")
     
