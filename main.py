@@ -33,7 +33,6 @@ from datetime import datetime
 # 2. .env (user overrides - if exists)
 try:
     from dotenv import load_dotenv
-    import os
     
     # First load defaults from .env.example
     load_dotenv(".env.example", override=False)
@@ -47,7 +46,6 @@ try:
         os.environ["LLAMA_BASE_URL"] = "http://127.0.0.1:8080"
 except ImportError:
     # If python-dotenv is not installed, use hardcoded defaults
-    import os
     if "LLAMA_BASE_URL" not in os.environ:
         os.environ["LLAMA_BASE_URL"] = "http://127.0.0.1:8080"
 import logging
