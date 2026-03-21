@@ -12,6 +12,10 @@ Agent1 is a plugin-based AI assistant server that communicates with multiple cli
 
 ## Running
 
+### Prerequisites
+
+You must run a llama.cpp server or use an OpenAPI compatible server. See `start_llama.sh` for an example of running locally.
+
 ### Option 1: Local Python Environment
 
 ```bash
@@ -32,10 +36,6 @@ python main.py terminal
 # WARNING: Uses host network (insecure but more secure than filesystem access)
 podman-compose up
 ```
-
-### Prerequisites
-
-You must run a llama.cpp server or use an OpenAPI compatible server. See `start_llama.sh` for an example of running locally.
 
 ## Configuration
 
