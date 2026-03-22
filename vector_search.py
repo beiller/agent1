@@ -17,10 +17,12 @@ except ImportError:
 
 # Model configuration
 MODEL_NAME = 'all-MiniLM-L6-v2'  # Fast, small (~80MB), good quality
-MODEL_CACHE_PATH = os.path.expanduser('~/.cache/agent1/sentence_transformer')
+MODEL_CACHE_PATH = '.cache'
+MODEL = None
 
 def _ensure_model_loaded() -> Optional[SentenceTransformer]:
     """Load or download the sentence transformer model. Auto-downloads on first use."""
+    global MODEL
     if not SENTENCE_TRANSFORMER_AVAILABLE:
         print("ERROR: sentence-transformers not installed. Install with: pip install sentence-transformers")
         return None
@@ -30,8 +32,8 @@ def _ensure_model_loaded() -> Optional[SentenceTransformer]:
     
     try:
         # This will download the model on first use and cache it
-        model = SentenceTransformer(MODEL_NAME, cache_folder=MODEL_CACHE_PATH, device="cpu")
-        return model
+        MODEL = SentenceTransformer(MODEL_NAME, cache_folder=MODEL_CACHE_PATH, device="cpu")
+        return MODEL
     except Exception as e:
         print(f"ERROR: Failed to load sentence transformer model: {e}")
         return None
@@ -224,7 +226,7 @@ def search_database(db: Dict, keyword: str, context_window: int, top_k: int, top
     
     return json.dumps(final_results, indent=2)
 
-def vector_search(keyword_to_search: str, context_size: int = 1000, top_k: int = 3, top_j_per_doc: int = 2) -> str:
+def vector_search(keyword_to_search: str, context_size: int = 1000, top_k_docs: int = 3, top_j_per_doc: int = 2) -> str:
     """Search for previous conversation history about a conversation topic. 
     
     Provide a `keyword_to_search`. This is a string that represents the conversation words 
@@ -237,19 +239,19 @@ def vector_search(keyword_to_search: str, context_size: int = 1000, top_k: int =
     ranked by relevance score within each document.
     
     The search uses semantic embeddings (sentence-transformers) which understand meaning,
-    not just keywords. First run will download the model (~80MB), subsequent runs are cached.
+    not just keywords.
     
     Args:
         keyword_to_search: The search query
         context_size: How many characters of context to include around matches
-        top_k: Number of top documents to return (not per-document) (default: 3)
+        top_k_docs: Number of top documents to return (not per-document) (default: 3)
         top_j_per_doc: Number of top matches to show within each document (default: 2)
     
     Returns:
         JSON string with search results
     """
     db = build_database()
-    results = search_database(db, keyword_to_search, context_size, top_k, top_j_per_doc)
+    results = search_database(db, keyword_to_search, context_size, top_k_docs, top_j_per_doc)
     return results
 
 

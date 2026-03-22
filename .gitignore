@@ -5,3 +5,4 @@ nohup.out
 .env
 conversations/*.txt
 conversations/*.json
+.cache
