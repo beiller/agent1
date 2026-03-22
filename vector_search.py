@@ -23,16 +23,26 @@ MODEL = None
 def _ensure_model_loaded() -> Optional[SentenceTransformer]:
     """Load or download the sentence transformer model. Auto-downloads on first use."""
     global MODEL
+
+    if MODEL: return MODEL
+
     if not SENTENCE_TRANSFORMER_AVAILABLE:
         print("ERROR: sentence-transformers not installed. Install with: pip install sentence-transformers")
         return None
     
     # Create cache directory
-    os.makedirs(MODEL_CACHE_PATH, exist_ok=True)
-    
+    use_local = os.path.isdir(".cache")
+    if not use_local:
+        os.makedirs(MODEL_CACHE_PATH, exist_ok=True)
+
     try:
         # This will download the model on first use and cache it
-        MODEL = SentenceTransformer(MODEL_NAME, cache_folder=MODEL_CACHE_PATH, device="cpu")
+        MODEL = SentenceTransformer(
+            MODEL_NAME, 
+            cache_folder=MODEL_CACHE_PATH, 
+            device="cpu",
+            local_files_only=use_local
+        )
         return MODEL
     except Exception as e:
         print(f"ERROR: Failed to load sentence transformer model: {e}")
