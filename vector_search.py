@@ -28,7 +28,7 @@ MODEL_CACHE_PATH = '.cache'
 MODEL = None
 
 # File filtering constants
-MAX_FILE_SIZE = 500_000  # 500KB limit
+MAX_FILE_SIZE = 5_000  # 500KB limit
 
 def is_text_file(filepath):
     """Quick check if file is text (not binary). Returns True if first 512 bytes have no null chars."""
@@ -328,9 +328,10 @@ def search_database(db: Dict, keyword: str, context_window: int, top_k: int,
             with open(filepath, 'r', encoding='utf-8') as f:
                 full_doc = preprocess(f.read())
             
-            start = max(0, result['doc_start'] - context_window)
-            end = min(len(full_doc), result['doc_end'] + context_window)
-            snippet = full_doc[start:end]
+            #start = max(0, result['doc_start'] - context_window)
+            #end = min(len(full_doc), result['doc_end'] + context_window)
+            #snippet = full_doc[start:end]
+            snippet = full_doc
             
             all_results.append({
                 'filename': rel_path,
