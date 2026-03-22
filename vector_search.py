@@ -183,15 +183,6 @@ def search(store, query: str, top_k: int) -> List[Dict]:
         return []
 
 def scan_directory(directory: str, depth: int = 8) -> List[str]:
-    """Recursively scan directory for all text files up to specified depth.
-    
-    Args:
-        directory: Root directory to scan
-        depth: Maximum depth to traverse (default: 8)
-    
-    Returns:
-        List of absolute file paths to text files (any extension, filtered by size and type)
-    """
     text_files = []
     base_depth = directory.rstrip(os.sep).count(os.sep)
     
@@ -223,19 +214,6 @@ def scan_directory(directory: str, depth: int = 8) -> List[str]:
     return sorted(text_files)
 
 def pre_filter_documents(file_contents: Dict[str, str], query: str) -> List[str]:
-    """Pre-filter documents using fuzzy matching before embedding.
-    
-    First tries exact word match (fast), then falls back to fuzzy matching
-    if rapidfuzz is available. This catches typos and similar words.
-    
-    Args:
-        file_contents: Dict mapping filepath to file content
-        query: Search query string
-    
-    Returns:
-        List of filepaths that contain at least one word from the query
-        (exact or fuzzy match)
-    """
     # Split query into individual words (lowercase, alphanumeric only, 3+ chars)
     query_words = re.findall(r'\b[a-zA-Z0-9]{3,}\b', query.lower())
     
@@ -271,16 +249,6 @@ def pre_filter_documents(file_contents: Dict[str, str], query: str) -> List[str]
 
 def build_database(directory: str = "conversations", depth: int = 8, 
                    pre_filter_query: Optional[str] = None) -> Dict:
-    """Build database from all text files in specified directory.
-    
-    Args:
-        directory: Root directory to scan for text files
-        depth: Maximum depth to traverse down the directory tree (default: 8)
-        pre_filter_query: Optional query string to pre-filter documents by exact word match
-    
-    Returns:
-        Vector store dictionary
-    """
     db = create_store()
     
     # Scan directory for all text files up to specified depth
@@ -326,19 +294,6 @@ def build_database(directory: str = "conversations", depth: int = 8,
 
 def search_database(db: Dict, keyword: str, context_window: int, top_k: int, 
                     top_j_per_doc: int = 3, base_dir: str = "conversations") -> str:
-    """Search database and return top_k documents with top_j matches per document.
-    
-    Args:
-        db: Vector store dictionary
-        keyword: Search query string
-        context_window: Characters of context to include around each match
-        top_k: Number of top documents to return
-        top_j_per_doc: Number of top matches per document (default: 3)
-        base_dir: Base directory for resolving file paths
-    
-    Returns:
-        JSON string with search results
-    """
     all_results = []
     
     # Get more candidates to ensure we have enough after grouping by document
