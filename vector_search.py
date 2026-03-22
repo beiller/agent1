@@ -22,13 +22,21 @@ try:
 except ImportError:
     pass
 
+# Lazy import for fuzzy matching - optional enhancement
+RAPIDFUZZ_AVAILABLE = False
+try:
+    from rapidfuzz import fuzz as rapidfuzz_fuzz
+    RAPIDFUZZ_AVAILABLE = True
+except ImportError:
+    pass
+
 # Model configuration
 MODEL_NAME = 'paraphrase-MiniLM-L3-v2'  # Fast, small (~40MB), good quality
 MODEL_CACHE_PATH = '.cache'
 MODEL = None
 
 # File filtering constants
-MAX_FILE_SIZE = 5_000  # 500KB limit
+MAX_FILE_SIZE = 500_000  # 500KB limit
 
 def is_text_file(filepath):
     """Quick check if file is text (not binary). Returns True if first 512 bytes have no null chars."""
@@ -215,9 +223,10 @@ def scan_directory(directory: str, depth: int = 8) -> List[str]:
     return sorted(text_files)
 
 def pre_filter_documents(file_contents: Dict[str, str], query: str) -> List[str]:
-    """Pre-filter documents by exact word match before embedding.
+    """Pre-filter documents using fuzzy matching before embedding.
     
-    Splits query into words and finds documents containing any of those words.
+    First tries exact word match (fast), then falls back to fuzzy matching
+    if rapidfuzz is available. This catches typos and similar words.
     
     Args:
         file_contents: Dict mapping filepath to file content
@@ -225,25 +234,39 @@ def pre_filter_documents(file_contents: Dict[str, str], query: str) -> List[str]
     
     Returns:
         List of filepaths that contain at least one word from the query
+        (exact or fuzzy match)
     """
-    # Split query into individual words (lowercase, alphanumeric only)
-    query_words = re.findall(r'\b[a-zA-Z0-9]+\b', query.lower())
-    query_words = [q for q in query_words if len(q) > 1] + [query.lower(), ]
-
+    # Split query into individual words (lowercase, alphanumeric only, 3+ chars)
+    query_words = re.findall(r'\b[a-zA-Z0-9]{3,}\b', query.lower())
+    
     if not query_words:
-        print("warning: no filter")
-        return list(file_contents.keys())  # No words to filter by, return all
-    else:
-        print("filter ", query_words)
-
+        print("warning: no filter words found")
+        return list(file_contents.keys())
+    
+    print(f"pre-filtering with words: {query_words}")
+    
     matching_files = []
     
-    for filepath, content in file_contents.items():
-        content_lower = content.lower()
-        # Check if any query word appears in the document
+    for filepath, doc_content in file_contents.items():
+        content_lower = doc_content.lower()
+        
+        # Strategy 1: Exact match first (fastest)
         if any(word in content_lower for word in query_words):
             matching_files.append(filepath)
+            continue
+        
+        # Strategy 2: Fuzzy match fallback (if available)
+        if RAPIDFUZZ_AVAILABLE:
+            for word in query_words:
+                content_words = re.findall(r'\b\w+\b', content_lower)
+                scores = [rapidfuzz_fuzz.ratio(word, cw) 
+                         for cw in content_words if len(cw) >= 2]
+                
+                if scores and max(scores) >= 70:  # 70% similarity threshold
+                    matching_files.append(filepath)
+                    break
     
+    print(f"pre-filtered {len(matching_files)}/{len(file_contents)} files")
     return matching_files
 
 def build_database(directory: str = "conversations", depth: int = 8, 
