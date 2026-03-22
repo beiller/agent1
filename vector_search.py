@@ -351,10 +351,9 @@ def search_database(db: Dict, keyword: str, context_window: int, top_k: int,
             with open(filepath, 'r', encoding='utf-8') as f:
                 full_doc = preprocess(f.read())
             
-            #start = max(0, result['doc_start'] - context_window)
-            #end = min(len(full_doc), result['doc_end'] + context_window)
-            #snippet = full_doc[start:end]
-            snippet = full_doc
+            start = max(0, result['doc_start'] - context_window)
+            end = min(len(full_doc), result['doc_end'] + context_window)
+            snippet = full_doc[start:end]
             
             all_results.append({
                 'filename': rel_path,
@@ -399,14 +398,14 @@ def search_database(db: Dict, keyword: str, context_window: int, top_k: int,
     
     return json.dumps(final_results, indent=2)
 
-def vector_search(keyword_to_search: str, context_size: int = 1000, top_k_docs: int = 3, 
+def vector_search(keyword_to_search: str, context_size: int = 128, top_k_docs: int = 3, 
                   top_j_per_doc: int = 2, directory: str = "conversations", depth: int = 8) -> str:
     """Search for keyword matches in text, code, anything! Returns surrounding context
     
     Provide a `keyword_to_search`. This is a string that represents the conversation words 
     that may be in chat history.
 
-    Optionally use `context_size` if you need more information and you were not successful at first. 
+    Optionally use `context_size` (default 128) if you need more information and you were not successful at first. 
     Use a larger size up to 1000+
     
     This function returns JSON with top matching snippets from documents, 
@@ -418,8 +417,8 @@ def vector_search(keyword_to_search: str, context_size: int = 1000, top_k_docs: 
     Args:
         keyword_to_search: The search query
         context_size: How many characters of context to include around matches
-        top_k_docs: Number of top documents to return (not per-document)
-        top_j_per_doc: Number of top matches to show within each document
+        top_k_docs: Number of top documents to return (not per-document) (default 3)
+        top_j_per_doc: Number of top matches to show within each document (default 2)
         directory: Directory to scan for text files (default: "conversations", feel free to contextually search even code!)
         depth: Maximum depth to traverse down the directory tree (default: 8)
 
