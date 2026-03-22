@@ -7,6 +7,13 @@ import json
 import argparse
 import glob
 
+# Progress bar
+try:
+    from tqdm import tqdm
+    HAS_TQDM = True
+except ImportError:
+    HAS_TQDM = False
+
 # Lazy import - will fail gracefully if not installed
 SENTENCE_TRANSFORMER_AVAILABLE = False
 try:
@@ -16,9 +23,20 @@ except ImportError:
     pass
 
 # Model configuration
-MODEL_NAME = 'all-MiniLM-L6-v2'  # Fast, small (~80MB), good quality
+MODEL_NAME = 'paraphrase-MiniLM-L3-v2'  # Fast, small (~40MB), good quality
 MODEL_CACHE_PATH = '.cache'
 MODEL = None
+
+# File filtering constants
+MAX_FILE_SIZE = 500_000  # 500KB limit
+
+def is_text_file(filepath):
+    """Quick check if file is text (not binary). Returns True if first 512 bytes have no null chars."""
+    try:
+        with open(filepath, 'rb') as f:
+            return b'\x00' not in f.read(512)
+    except:
+        return False
 
 def _ensure_model_loaded() -> Optional[SentenceTransformer]:
     """Load or download the sentence transformer model. Auto-downloads on first use."""
@@ -59,8 +77,7 @@ def create_store():
     }
 
 def preprocess(text: str) -> str:
-    """Clean text for processing."""
-    return re.sub(r'[\W_]+', ' ', text).replace("  ", " ").strip()
+    return text
 
 def add(store, text: str, doc_id: str, max_chunk_size: int = 300) -> None:
     """Add document to store using paragraph-aware chunking."""
@@ -158,16 +175,16 @@ def search(store, query: str, top_k: int) -> List[Dict]:
         return []
 
 def scan_directory(directory: str, depth: int = 8) -> List[str]:
-    """Recursively scan directory for text files up to specified depth.
+    """Recursively scan directory for all text files up to specified depth.
     
     Args:
         directory: Root directory to scan
         depth: Maximum depth to traverse (default: 8)
     
     Returns:
-        List of absolute file paths to .txt files
+        List of absolute file paths to text files (any extension, filtered by size and type)
     """
-    txt_files = []
+    text_files = []
     base_depth = directory.rstrip(os.sep).count(os.sep)
     
     for root, dirs, files in os.walk(directory):
@@ -180,43 +197,112 @@ def scan_directory(directory: str, depth: int = 8) -> List[str]:
             continue
         
         for filename in files:
-            if filename.endswith('.txt'):
-                filepath = os.path.join(root, filename)
-                txt_files.append(filepath)
+            filepath = os.path.join(root, filename)
+            
+            # Filter by file size (skip files > 500KB)
+            try:
+                if os.path.getsize(filepath) > MAX_FILE_SIZE:
+                    continue
+            except:
+                continue
+            
+            # Filter for text files only (skip binary files)
+            if not is_text_file(filepath):
+                continue
+            
+            text_files.append(filepath)
     
-    return sorted(txt_files)
+    return sorted(text_files)
 
-def build_database(directory: str = "conversations", depth: int = 8) -> Dict:
-    """Build database from all txt files in specified directory.
+def pre_filter_documents(file_contents: Dict[str, str], query: str) -> List[str]:
+    """Pre-filter documents by exact word match before embedding.
+    
+    Splits query into words and finds documents containing any of those words.
     
     Args:
-        directory: Root directory to scan for .txt files
+        file_contents: Dict mapping filepath to file content
+        query: Search query string
+    
+    Returns:
+        List of filepaths that contain at least one word from the query
+    """
+    # Split query into individual words (lowercase, alphanumeric only)
+    query_words = re.findall(r'\b[a-zA-Z0-9]+\b', query.lower())
+    query_words = [q for q in query_words if len(q) > 1] + [query.lower(), ]
+
+    if not query_words:
+        print("warning: no filter")
+        return list(file_contents.keys())  # No words to filter by, return all
+    else:
+        print("filter ", query_words)
+
+    matching_files = []
+    
+    for filepath, content in file_contents.items():
+        content_lower = content.lower()
+        # Check if any query word appears in the document
+        if any(word in content_lower for word in query_words):
+            matching_files.append(filepath)
+    
+    return matching_files
+
+def build_database(directory: str = "conversations", depth: int = 8, 
+                   pre_filter_query: Optional[str] = None) -> Dict:
+    """Build database from all text files in specified directory.
+    
+    Args:
+        directory: Root directory to scan for text files
         depth: Maximum depth to traverse down the directory tree (default: 8)
+        pre_filter_query: Optional query string to pre-filter documents by exact word match
     
     Returns:
         Vector store dictionary
     """
     db = create_store()
     
-    # Scan directory for all .txt files up to specified depth
-    txt_files = scan_directory(directory, depth)
+    # Scan directory for all text files up to specified depth
+    print(f"Scanning '{directory}'...")
+    text_files = scan_directory(directory, depth)
     
-    print(f"Found {len(txt_files)} text files in '{directory}' (depth={depth})")
+    print(f"Found {len(text_files)} text files (depth={depth}, size <= 500KB)")
     
-    for filepath in txt_files:
+    if not text_files:
+        return db
+    
+    # Load all file contents first with progress bar
+    file_contents = {}
+    iter_files = tqdm(text_files, desc="Loading files", disable=not HAS_TQDM) if HAS_TQDM else text_files
+    for filepath in iter_files:
         try:
             with open(filepath, 'r', encoding='utf-8') as f:
                 content = f.read()
-            
-            # Use relative path from directory as doc_id for cleaner output
-            rel_path = os.path.relpath(filepath, directory)
-            add(db, content, rel_path)
+            file_contents[filepath] = content
         except Exception as e:
             print(f"WARNING: Could not read {filepath}: {e}")
     
+    # Pre-filter documents if query provided
+    if pre_filter_query:
+        matching_files = pre_filter_documents(file_contents, pre_filter_query)
+        print(f"Pre-filtered to {len(matching_files)} files containing query words")
+        files_to_process = matching_files
+    else:
+        files_to_process = list(file_contents.keys())
+    
+    # Add filtered documents to database with progress bar
+    print(f"Building embeddings...")
+    iter_docs = tqdm(files_to_process, desc="Processing", disable=not HAS_TQDM) if HAS_TQDM else files_to_process
+    for filepath in iter_docs:
+        content = file_contents[filepath]
+        
+        # Use relative path from directory as doc_id for cleaner output
+        rel_path = os.path.relpath(filepath, directory)
+        add(db, content, rel_path)
+    
+    print(f"Done! {len(db['chunks'])} chunks ready")
     return db
 
-def search_database(db: Dict, keyword: str, context_window: int, top_k: int, top_j_per_doc: int = 3, base_dir: str = "conversations") -> str:
+def search_database(db: Dict, keyword: str, context_window: int, top_k: int, 
+                    top_j_per_doc: int = 3, base_dir: str = "conversations") -> str:
     """Search database and return top_k documents with top_j matches per document.
     
     Args:
@@ -303,20 +389,21 @@ def vector_search(keyword_to_search: str, context_size: int = 1000, top_k_docs: 
     ranked by relevance score within each document.
     
     The search uses semantic embeddings (sentence-transformers) which understand meaning,
-    not just keywords.
+    not just keywords. Pre-filters documents by exact word match before embedding for speed.
     
     Args:
         keyword_to_search: The search query
         context_size: How many characters of context to include around matches
         top_k_docs: Number of top documents to return (not per-document)
         top_j_per_doc: Number of top matches to show within each document
-        directory: Directory to scan for .txt files (default: "conversations", feel free to contextually search even code!)
+        directory: Directory to scan for text files (default: "conversations", feel free to contextually search even code!)
         depth: Maximum depth to traverse down the directory tree (default: 8)
 
     Returns:
         JSON string with search results
     """
-    db = build_database(directory, depth)
+    # Pre-filter documents using exact word match before building embeddings
+    db = build_database(directory, depth, pre_filter_query=keyword_to_search)
     results = search_database(db, keyword_to_search, context_size, top_k_docs, top_j_per_doc, directory)
     return results
 
@@ -336,7 +423,7 @@ Examples:
     
     parser.add_argument('keyword', type=str, help='Search query keyword or phrase')
     parser.add_argument('-d', '--directory', type=str, default='conversations',
-                        help='Directory to scan for .txt files (default: conversations)')
+                        help='Directory to scan for text files (default: conversations)')
     parser.add_argument('--depth', type=int, default=8,
                         help='Maximum depth to traverse down directory tree (default: 8)')
     parser.add_argument('-c', '--context-size', type=int, default=1000,
@@ -364,4 +451,3 @@ Examples:
     )
     
     print(results)
-
