@@ -9,22 +9,43 @@ Agent1 is a plugin-based AI assistant server that communicates with multiple cli
 - Plugin-based skill system for extensibility
 - Conversation memory with vector search capabilities
 - Async message queue architecture
+- **One-click setup** - Everything automates for you! 🚀
+
+## Quick Start (One-Click Install)
+
+```bash
+# Clone the repository
+git clone https://github.com/your-repo/agent1.git
+cd agent1
+
+# Run the one-click setup script
+chmod +x setup.sh
+./setup.sh
+
+# Start the server
+python main.py terminal
+```
+
+That's it! The `setup.sh` script will:
+1. ✅ Check for Python and create a virtual environment
+2. ✅ Install all dependencies automatically
+3. ✅ Build llama.cpp from source (with CUDA support if available)
+4. ✅ Download a default model (Qwen3.5-27B-Q4_K_M)
 
 ## Running
 
 ### Prerequisites
 
-You must run a llama.cpp server or use an OpenAPI compatible server. See `start_llama.sh` for an example of running locally.
+The setup script handles most prerequisites, but you should have:
+- Python 3.x installed
+- Git installed
+- (Optional) NVIDIA GPU with CUDA for faster inference
 
-### Option 1: Local Python Environment
+### Option 1: Local Python Environment (After Setup)
 
 ```bash
-# Create virtual environment
-python -m venv venv
-source ./venv/bin/activate
-
-# Install dependencies
-pip install -r requirements.txt
+# Activate virtual environment
+source venv/bin/activate
 
 # Run the server
 python main.py terminal
@@ -44,6 +65,18 @@ See `config.json` for available options:
 - `"terminal"` - Local terminal interface
 - `"discord_client"` - Discord integration (requires API key in `.env` and a Discord APP)
 - `"irc_client"` - IRC integration (requires code edits for server credentials)
+
+### Environment Variables
+
+The system uses a dotenv priority system:
+1. **Hardcoded defaults** - Fallback values if no env files exist
+2. **`.env.example`** - Template with sensible defaults (loaded automatically)
+3. **`.env`** - Your custom overrides (if present, takes precedence)
+
+Simply copy `.env.example` to `.env` and modify as needed:
+```bash
+cp .env.example .env  # Optional: customize your settings
+```
 
 ## High-Level Components
 
@@ -155,6 +188,8 @@ All `.txt` files in the `conversations/` directory are automatically included in
 ├── vector_search.py     # Conversation search
 ├── config.json          # Configuration
 ├── requirements.txt     # Python dependencies
+├── setup.sh            # 🚀 One-click setup script
+├── build_llama.py      # llama.cpp build script
 ├── skills/              # Skill definitions (.md files)
 │   ├── run_bash.md
 │   ├── curl.md

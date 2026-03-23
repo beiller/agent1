@@ -24,6 +24,7 @@ import aiohttp
 from collections.abc import Iterator
 from typing import AsyncIterator, Callable, get_type_hints, Protocol, TypedDict
 from vector_search import vector_search
+from download_model import download_model
 import random
 import string
 from datetime import datetime
@@ -265,12 +266,13 @@ def execute_tool_calls(
 
 def build_tools() -> tuple[list[Tool], dict[str, ToolHandler]]:
     """Build the full tools list and registry by reloading skills from disk."""
-    tools: list[Tool] = [tool_from_function(run_bash), tool_from_function(vector_search), 
+    tools: list[Tool] = [tool_from_function(run_bash), tool_from_function(vector_search), tool_from_function(download_model),
                            tool_from_function(load_model), tool_from_function(unload_model), 
                            tool_from_function(list_models)]
     registry: dict[str, ToolHandler] = {
         "run_bash": run_bash,
         "vector_search": vector_search,
+        "download_model": download_model,
         "load_model": load_model,
         "unload_model": unload_model,
         "list_models": list_models,
@@ -620,6 +622,17 @@ async def main(
     """Run the conversation loop, using the provided I/O callbacks."""
     # Load from environment variables if not provided
     base_url = os.getenv("LLAMA_BASE_URL")
+
+    # Run llama.sh before starting the main server loop
+    # Try starting llama-server in background with fallback to setup.sh
+    print("Attempting to start llama-server via start_llama.sh...")
+    llama_proc = subprocess.Popen("./start_llama.sh", shell=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    await asyncio.sleep(2)  # Wait briefly for it to start/fail without blocking
+    if llama_proc.poll() is None:
+        print("start_llama.sh started successfully")
+    else:
+        print(f"start_llama.sh exited with code {llama_proc.returncode}, trying setup.sh once...")
+        subprocess.run(["./setup.sh"], shell=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     
     #messages: list[Message] = []
 
@@ -669,6 +682,8 @@ async def main(
     except Exception as e:
         logger.error(f"Main loop error: {e}")
         raise
+    finally:
+        llama_proc.kill()
 
 
 async def async_main(client_type: str, resume: bool = False):

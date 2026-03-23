@@ -6,3 +6,5 @@ nohup.out
 conversations/*.txt
 conversations/*.json
 .cache
+models/*.gguf
+models/*.safetensors
