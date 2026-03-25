@@ -36,9 +36,35 @@ def rate_limit(calls, period=10):
         return wrapper
     return decorator
 
+def retry(
+    max_retries: int = 5,
+    base_delay: float = 1.0,
+    max_delay: float = 60.0,
+    exponent: float = 2.0
+):
+    def decorator(func):
+        timestamps = []
+        async def wrapper(*args, **kwargs):
+            last_exception = None
+            for attempt in range(max_retries + 1):
+                try:
+                    return func(*args, **kwargs)
+                except Exception as e:
+                    last_exception = e
+                    delay = min(base_delay * (exponent ** attempt), max_delay)
+                    logger.warning(
+                        f"Attempt {attempt + 1}/{max_retries} failed with exception {e}. "
+                        f"Retrying in {delay:.2f}s..."
+                    )
+                    await asyncio.sleep(delay)
+                raise last_exception
+        return wrapper
+    return decorator
+
 
 user_id_mapping = {}
 
+@retry
 @rate_limit(10, 10)
 async def reply_rate_limit(user_id: str, message):
     global client, user_id_mapping
@@ -65,16 +91,20 @@ async def message_poll():
     while True:
         if outbox:
             for id_message in outbox:
-                query_id, message = id_message
+                query_id, role, message = id_message
                 # Send the full message without chunking
                 # Discord allows up to 2000 characters per message
                 if client and not client.is_closed() and len(message) > 0:
+                    # Non assistant responses can be truncated
+                    if role != "assistant" and len(message) > 200: message = message[0:200] + "..."
+                    
                     # Split long messages into chunks of 1500 characters
                     chunks = split_message(message, 1500)
                     for chunk in chunks:
                         await reply_rate_limit(query_id, chunk)
                 outbox = []
         await asyncio.sleep(0.1)
+
 
 async def digest_user_query():
     global inbox, user_id_mapping
@@ -99,7 +129,7 @@ async def digest_agent_response():
         if chunk:
             message += token
         else:
-            outbox.append((user_id, message + token))
+            outbox.append((user_id, role, message + token))
             message = ""
 
 
