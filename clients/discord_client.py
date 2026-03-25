@@ -36,35 +36,8 @@ def rate_limit(calls, period=10):
         return wrapper
     return decorator
 
-def retry(
-    max_retries: int = 5,
-    base_delay: float = 1.0,
-    max_delay: float = 60.0,
-    exponent: float = 2.0
-):
-    def decorator(func):
-        timestamps = []
-        async def wrapper(*args, **kwargs):
-            last_exception = None
-            for attempt in range(max_retries + 1):
-                try:
-                    return func(*args, **kwargs)
-                except Exception as e:
-                    last_exception = e
-                    delay = min(base_delay * (exponent ** attempt), max_delay)
-                    logger.warning(
-                        f"Attempt {attempt + 1}/{max_retries} failed with exception {e}. "
-                        f"Retrying in {delay:.2f}s..."
-                    )
-                    await asyncio.sleep(delay)
-                raise last_exception
-        return wrapper
-    return decorator
-
-
 user_id_mapping = {}
 
-@retry
 @rate_limit(10, 10)
 async def reply_rate_limit(user_id: str, message):
     global client, user_id_mapping
