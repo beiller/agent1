@@ -626,6 +626,7 @@ async def main(
     # Run llama.sh before starting the main server loop
     # Try starting llama-server in background with fallback to setup.sh
     print("Attempting to start llama-server via start_llama.sh...")
+    global llama_proc
     llama_proc = subprocess.Popen("./start_llama.sh", shell=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     await asyncio.sleep(2)  # Wait briefly for it to start/fail without blocking
     if llama_proc.poll() is None:
@@ -683,23 +684,32 @@ async def main(
         logger.error(f"Main loop error: {e}")
         raise
     finally:
-        llama_proc.kill()
+        if llama_proc is not None:
+            try:
+                llama_proc.terminate()
+                try:
+                    llama_proc.wait(timeout=3)
+                except subprocess.TimeoutExpired:
+                    llama_proc.kill()
+                print("llama-server stopped")
+            except Exception as e:
+                print(f"Stopping llama-server: {e}")
 
 
 async def async_main(client_type: str, resume: bool = False):
     # Import client module based on command line argument
     if client_type == "terminal":
-        from clients import terminal
+        from clients import client
     elif client_type == "discord_client":
-        from clients import discord_client as terminal
+        from clients import discord_client as client
     elif client_type == "irc_client":
-        from clients import irc_client as terminal
+        from clients import irc_client as client
     else:
         raise ValueError(f"Unknown client type: {client_type}")
     
     # Create tasks for proper cancellation
-    init_task = asyncio.create_task(terminal.init(queue_query, get_reponse))
-    main_task = asyncio.create_task(main(on_ready=terminal.on_ready, resume=resume))
+    init_task = asyncio.create_task(client.init(queue_query, get_reponse))
+    main_task = asyncio.create_task(main(on_ready=client.on_ready, resume=resume))
     
     try:
         await asyncio.gather(init_task, main_task)
@@ -719,11 +729,11 @@ async def async_main(client_type: str, resume: bool = False):
         main_task.cancel()
         raise
     finally:
-        # Always call stop to clean up terminal
+        # Always call stop to clean up client
         try:
-            terminal.stop()
+            client.stop()
         except Exception as e:
-            logger.warning(f"Error during terminal cleanup: {e}")
+            logger.warning(f"Error during client cleanup: {e}")
 
 
 if __name__ == "__main__":
