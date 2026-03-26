@@ -59,6 +59,8 @@ from tools import (
     load_model,
     unload_model,
     list_models,
+    load_skills,
+    make_tool
 )
 
 
@@ -90,22 +92,6 @@ from conversation import (
 # ---------------------------------------------------------------------------
 # Pure constructors
 # ---------------------------------------------------------------------------
-
-
-def make_tool(
-    name: str,
-    description: str,
-    parameters: FunctionParameters,
-) -> Tool:
-    return {
-        "type": "function",
-        "function": {
-            "name": name,
-            "description": description,
-            "parameters": parameters,
-        },
-    }
-
 
 _TYPE_MAP = {str: "string", int: "integer", float: "number", bool: "boolean"}
 
@@ -398,52 +384,6 @@ async def handle_message(
         messages.extend(new_messages)
 
     write_conversation(session_id, messages)
-
-
-# Skill loader – turns skills/*.md into tools
-# ---------------------------------------------------------------------------
-
-
-def load_skills(
-    skills_dir: str | pathlib.Path
-) -> tuple[list[Tool], dict[str, ToolHandler]]:
-    """Scan skills_dir for .md files and return (tools, registry) for each."""
-    skills_dir = pathlib.Path(skills_dir)
-
-    tools = []
-    registry = {}
-    if not skills_dir.is_dir():
-        return tools, registry
-
-    for md_file in sorted(skills_dir.glob("*.md")):
-        text = md_file.read_text()
-        lines = text.splitlines()
-        description = lines[0].strip() if lines else md_file.stem
-        body = "\n".join(lines[1:]).strip()
-        skill_name = md_file.stem + "_skill"
-
-        tool = make_tool(
-            name=skill_name,
-            description=description,
-            parameters={
-                "type": "object",
-                "properties": {
-                    "command": {"type": "string", "description": "The command to run"},
-                },
-                "required": ["command"],
-            },
-        )
-
-        def _make_handler(content: str):
-            def handler(*, command: str) -> str:
-                return content
-
-            return handler
-
-        tools.append(tool)
-        registry[skill_name] = _make_handler(body)
-
-    return tools, registry
 
 
 # ---------------------------------------------------------------------------

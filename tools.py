@@ -6,8 +6,27 @@ import os
 import subprocess
 import urllib.request
 from typing import List
-
+import pathlib
 from main_types import Message
+
+
+
+
+def make_tool(
+    name: str,
+    description: str,
+    parameters: FunctionParameters,
+) -> Tool:
+    return {
+        "type": "function",
+        "function": {
+            "name": name,
+            "description": description,
+            "parameters": parameters,
+        },
+    }
+
+
 
 # ---------------------------------------------------------------------------
 # Tool implementations
@@ -132,3 +151,46 @@ def list_models() -> str:
             return json.dumps(result)
     except Exception as e:
         return json.dumps({"error": str(e)})
+
+
+
+def load_skills(
+    skills_dir: str | pathlib.Path
+) -> tuple[list[Tool], dict[str, ToolHandler]]:
+    """Scan skills_dir for .md files and return (tools, registry) for each."""
+    skills_dir = pathlib.Path(skills_dir)
+
+    tools = []
+    registry = {}
+    if not skills_dir.is_dir():
+        return tools, registry
+
+    for md_file in sorted(skills_dir.glob("*.md")):
+        text = md_file.read_text()
+        lines = text.splitlines()
+        description = lines[0].strip() if lines else md_file.stem
+        body = "\n".join(lines[1:]).strip()
+        skill_name = md_file.stem + "_skill"
+
+        tool = make_tool(
+            name=skill_name,
+            description=description,
+            parameters={
+                "type": "object",
+                "properties": {
+                    "command": {"type": "string", "description": "The command to run"},
+                },
+                "required": ["command"],
+            },
+        )
+
+        def _make_handler(content: str):
+            def handler(*, command: str) -> str:
+                return content
+
+            return handler
+
+        tools.append(tool)
+        registry[skill_name] = _make_handler(body)
+
+    return tools, registry
