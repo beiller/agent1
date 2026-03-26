@@ -130,10 +130,16 @@ SKILLS_DIR = ROOT_DIR / "skills"
 async def stream_chat_completion(
     base_url: str,
     messages: list[Message],
-    tools: list[Tool]
+    tools: list[Tool], 
+    session_id: SessionID
 ) -> AsyncIterator[ChatCompletionChunk]:
     """Send a streaming chat completion request, yielding SSE chunks asynchronously."""
     system_content = SYSTEM_MD.read_text() if SYSTEM_MD.exists() else ""
+    
+    # Add dynamic context to system prompt
+    session_context = f"\n\nCurrent time: {datetime.now().isoformat()}\nCurrent working directory: {os.getcwd()}\nActive session: {session_id}\n"
+    system_content += session_context
+
     # Strip timestamps before sending to LLM API
     msgs = [make_system_message(system_content)] + [
         {k: v for k, v in m.items() if k != "timestamp"} 
@@ -287,7 +293,8 @@ def build_tools() -> tuple[list[Tool], dict[str, ToolHandler]]:
 async def run_tool_loop(
     base_url: str,
     user_id: UserID,
-    messages: List[Message]
+    messages: List[Message],
+    session_id: SessionID
 ) -> str:
     """Stream messages, handle tool calls in a loop, return final text."""
     max_calls = 60
@@ -295,7 +302,7 @@ async def run_tool_loop(
 
     while True:
         tools, registry = build_tools()
-        chunks = stream_chat_completion(base_url, messages, tools)
+        chunks = stream_chat_completion(base_url, messages, tools, session_id)
 
         assistant_msg = await consume_stream(chunks, user_id, emit)
         emit(user_id, "assistant", "", False) # send a final empty message so the client knows the end of message.
@@ -348,7 +355,7 @@ async def handle_message(
     write_conversation(session_id, messages)
 
     reply = await run_tool_loop( # modifies messages
-        base_url, user_id, messages
+        base_url, user_id, messages, session_id
     )
     
     if approximate_token_count(json.dumps(messages)) > 25000:

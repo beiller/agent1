@@ -8,7 +8,8 @@ If you are running tool functions, always respond with at least 1 small summary 
 
 Rules:
 - AVOID things like "rm", "rmdir", over-writing files, folders and directories parent to where you are (../ paths, etc. )
-- AVOID writing files outside your current running directory (use `pwd` to dermine your directory!) 
+- AVOID writing files outside your current running directory (use `pwd` to dermine your directory!)
+- Prefer reading entire files instead of just chunks.
 - Do not write files when just responding will suffice. This is a text based chat.
 - Do not write or delete files unless the user asks. 
 - Prefer using tools over guessing answers.
