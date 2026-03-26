@@ -23,8 +23,6 @@ import urllib.request
 import aiohttp
 from collections.abc import Iterator
 from typing import AsyncIterator, Callable, get_type_hints, Protocol, TypedDict
-from vector_search import vector_search
-from download_model import download_model
 import random
 import string
 from datetime import datetime
@@ -53,7 +51,28 @@ import logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger()
 
+
+
+# Import tools from tools.py
+from tools import (
+    run_bash,
+    load_model,
+    unload_model,
+    list_models,
+)
+
+
+
 CURRENT_MODEL = os.environ.get("CURRENT_MODEL", "Qwen_Qwen3.5-27B-Q4_1")
+
+def load_model_and_set(model_name: str):
+    global CURRENT_MODEL
+    load_model(model_name)
+    CURRENT_MODEL = model_name
+
+# Import vector_search and download_model from their modules
+from vector_search import vector_search
+from download_model import download_model
 
 # ---------------------------------------------------------------------------
 # Types – Chat Completions API
@@ -280,7 +299,7 @@ def build_tools() -> tuple[list[Tool], dict[str, ToolHandler]]:
         "run_bash": run_bash,
         "vector_search": vector_search,
         "download_model": download_model,
-        "load_model": load_model,
+        "load_model": load_model_and_set,
         "unload_model": unload_model,
         "list_models": list_models,
     }
@@ -341,7 +360,6 @@ async def run_tool_loop(
             return text
 
 
-
 def approximate_token_count(text: str) -> int:
     # Rough estimate: ~4 characters per token for English text
     return int(len(text) / 4)
@@ -380,6 +398,46 @@ async def handle_message(
 
     write_conversation(session_id, messages)
 
+
+# ---------------------------------------------------------------------------
+# Conversation helpers
+# ---------------------------------------------------------------------------
+
+CONVERSATION_DIR = './conversations/'
+
+
+def archive_conversation(session_id: str, messages: List[Message]):
+    filename = datetime.now().strftime("%Y%m%d_%H%M%S") + "_" + session_id + ".txt"
+    archive_text = ""
+    for message in messages:
+        if message['role'] in ['tool', ] : continue
+        if 'timestamp' in message and message['timestamp']: archive_text += '[' + message['timestamp'] + '] '
+        archive_text += message['role'] + ":\n"
+        if 'content' in message and message['content']: archive_text += message['content'] + "\n"
+        if 'tool_calls' in message and message['tool_calls']: archive_text += json.dumps(message['tool_calls']) + "\n"
+        archive_text += "\n"
+
+    with open(CONVERSATION_DIR+filename, 'w') as fh:
+        fh.write(archive_text)
+
+    return CONVERSATION_DIR+filename
+
+
+def write_conversation(session_id: str, messages: List[Message]):
+    with open(CONVERSATION_DIR+session_id+'.json', 'w') as fh:
+        json.dump(messages, fh)
+
+
+def read_conversation(session_id: str) -> List[Message]:
+    with open(CONVERSATION_DIR+session_id+'.json') as fh:
+        return json.load(fh)
+
+
+def get_last_conversation_session_id() -> SessionID:
+    files = [f for f in pathlib.Path(CONVERSATION_DIR).iterdir() if f.is_file() and f.name.endswith(".json")]
+    session_id: SessionID = max(files, key=lambda f: f.stat().st_mtime).name.split('/')[-1].split('.')[0]
+    logger.info("Resuming session: " + session_id)
+    return session_id
 
 
 # ---------------------------------------------------------------------------
@@ -427,170 +485,6 @@ def load_skills(
         registry[skill_name] = _make_handler(body)
 
     return tools, registry
-
-
-# ---------------------------------------------------------------------------
-# Tool implementations
-CONVERSATION_DIR = './conversations/'
-
-def load_model(model_name: str) -> str:
-    """Load a specific model into llama-server router mode via its API.
-    
-    Requires llama-server to be running in router mode (started without --model flag).
-    The model must be discoverable via --models-dir or preset configuration.
-    
-    Args:
-        model_name: Name or path of the model to load
-        
-    Returns:
-        JSON string with success status and details
-    """
-    global CURRENT_MODEL
-    unload_model(CURRENT_MODEL)
-    base_url = os.getenv("LLAMA_BASE_URL")
-    CURRENT_MODEL = model_name 
-    try:
-        # llama-server router mode load endpoint
-        url = f"{base_url}/models/load"
-        data = json.dumps({"model": model_name}).encode('utf-8')
-        
-        req = urllib.request.Request(
-            url,
-            data=data,
-            headers={"Content-Type": "application/json"},
-            method="POST"
-        )
-        
-        with urllib.request.urlopen(req, timeout=60) as response:
-            result = json.loads(response.read().decode('utf-8'))
-            return json.dumps({"success": True, "model": model_name, "details": result})
-    except urllib.error.HTTPError as e:
-        error_body = e.read().decode('utf-8') if e.fp else "Unknown error"
-        return json.dumps({"success": False, "http_status": e.code, "error": error_body})
-    except Exception as e:
-        return json.dumps({"success": False, "error": str(e)})
-
-
-def unload_model(model_name: str) -> str:
-    """Unload a specific model from llama-server router mode via its API.
-    
-    Requires llama-server to be running in router mode.
-    
-    Args:
-        model_name: Name or path of the model to unload
-        
-    Returns:
-        JSON string with success status and details
-    """
-    base_url = os.getenv("LLAMA_BASE_URL")
-    try:
-        url = f"{base_url}/models/unload"
-        data = json.dumps({"model": model_name}).encode('utf-8')
-        
-        req = urllib.request.Request(
-            url,
-            data=data,
-            headers={"Content-Type": "application/json"},
-            method="POST"
-        )
-        
-        with urllib.request.urlopen(req, timeout=30) as response:
-            result = json.loads(response.read().decode('utf-8'))
-            return json.dumps({"success": True, "model": model_name, "details": result})
-    except urllib.error.HTTPError as e:
-        error_body = e.read().decode('utf-8') if e.fp else "Unknown error"
-        return json.dumps({"success": False, "http_status": e.code, "error": error_body})
-    except Exception as e:
-        return json.dumps({"success": False, "error": str(e)})
-
-
-def list_models() -> str:
-    """List all available models in llama-server router mode.
-    
-    Requires llama-server to be running in router mode.
-    Returns model names, statuses, and metadata.
-    
-    Returns:
-        JSON string with list of models and their status
-    """
-    base_url = os.getenv("LLAMA_BASE_URL")
-    try:
-        url = f"{base_url}/models"
-        
-        req = urllib.request.Request(
-            url,
-            method="GET"
-        )
-        
-        with urllib.request.urlopen(req, timeout=30) as response:
-            result = json.loads(response.read().decode('utf-8'))
-            return json.dumps(result)
-    except Exception as e:
-        return json.dumps({"error": str(e)})
-
-
-
-def archive_conversation(session_id: str, messages: List[Message]):
-    filename = datetime.now().strftime("%Y%m%d_%H%M%S") + "_" + session_id + ".txt"
-    archive_text = ""
-    for message in messages:
-        if message['role'] in ['tool', ] : continue
-        if 'timestamp' in message and message['timestamp']: archive_text += '[' + message['timestamp'] + '] '
-        archive_text += message['role'] + ":\n"
-        if 'content' in message and message['content']: archive_text += message['content'] + "\n"
-        if 'tool_calls' in message and message['tool_calls']: archive_text += json.dumps(message['tool_calls']) + "\n"
-        archive_text += "\n"
-
-    with open(CONVERSATION_DIR+filename, 'w') as fh:
-        fh.write(archive_text)
-
-    return CONVERSATION_DIR+filename
-
-
-def write_conversation(session_id: str, messages: List[Message]):
-    with open(CONVERSATION_DIR+session_id+'.json', 'w') as fh:
-        json.dump(messages, fh)
-
-
-def read_conversation(session_id: str) -> List[Message]:
-    with open(CONVERSATION_DIR+session_id+'.json') as fh:
-        return json.load(fh)
-
-
-def get_last_conversation_session_id() -> SessionID:
-    files = [f for f in pathlib.Path(CONVERSATION_DIR).iterdir() if f.is_file() and f.name.endswith(".json")]
-    session_id: SessionID = max(files, key=lambda f: f.stat().st_mtime).name.split('/')[-1].split('.')[0]
-    logger.info("Resuming session: " + session_id)
-    return session_id
-
-
-def run_bash(*, command: str) -> str:
-    """Run a bash command and return its output."""
-    try:
-        result = subprocess.run(
-            command,
-            shell=True,
-            capture_output=True,
-            text=True,
-            timeout=30,
-            stdin=subprocess.DEVNULL,
-        )
-        return json.dumps(
-            {
-                "stdout": result.stdout,
-                "stderr": result.stderr,
-                "returncode": result.returncode,
-            }
-        )
-    except Exception as e:
-        return json.dumps(
-            {
-                "stdout": "",
-                "stderr": str(e),
-                "returncode": -1,
-                "error": f"Command execution failed: {str(e)}",
-            }
-        )
 
 
 # ---------------------------------------------------------------------------
@@ -664,7 +558,7 @@ async def main(
 
     session_resumed = False
 
-    load_model(CURRENT_MODEL)
+    load_model_and_set(CURRENT_MODEL)
 
     try:
         while True:
@@ -768,4 +662,3 @@ if __name__ == "__main__":
         resume = sys.argv[2] == "true"
     # Run the async function with proper cancellation handling
     asyncio.run(async_main(config.get("client", "terminal"), resume))
-
