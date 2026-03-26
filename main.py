@@ -253,6 +253,7 @@ def execute_tool_calls(
             emit(user_id, "error", f"Unknown tool: {name}")
         else:
             args_short = ", ".join(f"{k}={v!r}" for k, v in args.items())
+            if len(args_short) > 200: args_short = args_short[0:200] + "..."
             emit(user_id, "tool", f"{name}({args_short})")
             output = handler(**args)
         results.append(make_tool_result_message(tc["id"], output))
@@ -292,17 +293,14 @@ async def run_tool_loop(
     max_calls = 60
     tool_counter = 0
 
-    #messages: List[Message] = get_user_messages(user_id)
-
     while True:
         tools, registry = build_tools()
         chunks = stream_chat_completion(base_url, messages, tools)
 
         assistant_msg = await consume_stream(chunks, user_id, emit)
-        emit(user_id, "assistant", "", False)
-        USE_STREAMED=True
+        emit(user_id, "assistant", "", False) # send a final empty message so the client knows the end of message.
         tool_msgs = execute_tool_calls(
-            assistant_msg, registry, user_id, streamed=USE_STREAMED,
+            assistant_msg, registry, user_id, streamed=True,
         )
 
         if not tool_msgs:
@@ -699,7 +697,7 @@ async def main(
 async def async_main(client_type: str, resume: bool = False):
     # Import client module based on command line argument
     if client_type == "terminal":
-        from clients import client
+        from clients import terminal as client
     elif client_type == "discord_client":
         from clients import discord_client as client
     elif client_type == "irc_client":
