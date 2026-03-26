@@ -67,6 +67,16 @@ from tools import (
 
 CURRENT_MODEL = os.environ.get("CURRENT_MODEL", "Qwen_Qwen3.5-27B-Q4_1")
 
+def is_llama_running(base_url: str) -> bool:
+    """Check if llama-server is already running by making a request to the API."""
+    try:
+        import urllib.request
+        response = urllib.request.urlopen(f"{base_url}/v1/models", timeout=2)
+        return response.status == 200
+    except Exception:
+        return False
+
+
 def load_model_and_set(model_name: str):
     global CURRENT_MODEL
     load_model(model_name)
@@ -433,16 +443,22 @@ async def main(
     base_url = os.getenv("LLAMA_BASE_URL")
 
     # Run llama.sh before starting the main server loop
-    # Try starting llama-server in background with fallback to setup.sh
-    print("Attempting to start llama-server via start_llama.sh...")
+    # Check if llama-server is already running
     global llama_proc
-    llama_proc = subprocess.Popen("./start_llama.sh", shell=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True)
-    await asyncio.sleep(2)  # Wait briefly for it to start/fail without blocking
-    if llama_proc.poll() is None:
-        print("start_llama.sh started successfully")
+    llama_proc = None
+    
+    if is_llama_running(base_url):
+        print("llama-server is already running, skipping start")
     else:
-        print(f"start_llama.sh exited with code {llama_proc.returncode}, trying setup.sh once...")
-        subprocess.run(["./setup.sh"], shell=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        # Try starting llama-server in background with fallback to setup.sh
+        print("Attempting to start llama-server via start_llama.sh...")
+        llama_proc = subprocess.Popen("./start_llama.sh", shell=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True)
+        await asyncio.sleep(2)  # Wait briefly for it to start/fail without blocking
+        if llama_proc.poll() is None:
+            print("start_llama.sh started successfully")
+        else:
+            print(f"start_llama.sh exited with code {llama_proc.returncode}, trying setup.sh once...")
+            subprocess.run(["./setup.sh"], shell=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     
     #messages: list[Message] = []
 

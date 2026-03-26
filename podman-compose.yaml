@@ -7,13 +7,13 @@ services:
       dockerfile: Dockerfile
     container_name: async-main-app
     env_file:
+      - .env.example
       - .env
     network_mode: "host"
     volumes:
-      - ./main.py:/app/main.py:ro
-      - ./discord_client.py:/app/discord_client.py:ro
-      - ./irc_client.py:/app/irc_client.py:ro
-      - ./terminal.py:/app/terminal.py:ro
-      - ./supervisor.py:/app/supervisor.py:ro
       - ./config.json:/app/config.json:ro
+      - ./models:/app/models
+      - ./conversations:/app/conversations
+    stdin_open: true
+    tty: true
     restart: unless-stopped
