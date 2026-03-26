@@ -20,6 +20,7 @@ inbox = []
 
 queue_query: Callable[[str, str], None] = None
 get_response: Callable[None, Tuple[str, str, str, bool]] = None
+set_interrupt: Callable[[str], None] = None
 
 import time
 
@@ -79,18 +80,23 @@ async def message_poll():
         await asyncio.sleep(0.1)
 
 
+def get_unique_query_id(message):
+    user_id = message.author.id
+    message_id = message.id
+    channel_id = message.channel.id
+    guild_id = message.guild.id if message.guild else None
+    query_id = str(channel_id) + ':' + str(message_id)
+    return query_id
+
+
 async def digest_user_query():
     global inbox, user_id_mapping
     while True:
         while inbox:
             message = inbox.pop()
-            user_id = message.author.id
-            message_id = message.id
-            channel_id = message.channel.id
-            guild_id = message.guild.id if message.guild else None
-            query_id = str(channel_id) + ':' + str(message_id)
-            user_id_mapping[user_id] = query_id
-            await queue_query(user_id, message.content)
+            query_id = get_unique_query_id(message)
+            user_id_mapping[message.author.id] = query_id
+            await queue_query(message.author.id, message.content)
         await asyncio.sleep(0.01)
 
 
@@ -120,7 +126,10 @@ class DiscordClient(commands.Bot):
             return
 
         logger.info(f"DM from {message.author}: {message.content}")
-        inbox.append(message)
+        if message.content.lower().strip() == "stop":
+            await set_interrupt(get_unique_query_id(message))
+        else:
+            inbox.append(message)
         # Optionally reply to confirm receipt
         #await message.reply("Message received!")
     
@@ -153,11 +162,16 @@ def stop():
         else:
             asyncio.run(client.close())
 
-async def init(_queue_query: Callable[[str, str], None], _get_response: Callable[None, Tuple[str, str, str, bool]]):
-    global queue_query, get_response
+async def init(
+    _queue_query: Callable[[str, str], None], 
+    _get_response: Callable[None, Tuple[str, str, str, bool]],
+    _set_interrupt: Callable[[str], None]
+    ):
+    global queue_query, get_response, set_interrupt
     
     queue_query = _queue_query
     get_response = _get_response
+    set_interrupt = _set_interrupt
     
     # Start the Discord client in a separate thread
     #import threading

@@ -75,12 +75,14 @@ async def ainput(string: str) -> str:
 
 async def read_input() -> str | None:
     """Read user input and queue queries. Handles shutdown gracefully."""
+    global interrupts
     logger.info("Starting input reader...")
     try:
         while not _shutdown_event.is_set():
             try:
                 user_prompt = await ainput("")
                 await queue_query("0", user_prompt)
+                interrupts = 0
             except asyncio.TimeoutError:
                 # Check if we should shutdown
                 if _shutdown_event.is_set():
@@ -153,8 +155,9 @@ def stop():
     sys.stderr.write("\033[0m")
     sys.stderr.flush()
 
-
-async def init(_queue_query: Callable[str], _get_response: Callable[None]):
+import signal
+interrupts = 0
+async def init(_queue_query: Callable[[str], None], _get_response: Callable[None, [str, str, str, bool]], set_interrupt: Callable[[str, ], None]):
     """Initialize the terminal client and start I/O tasks."""
     global queue_query, get_response
     queue_query = _queue_query
@@ -163,6 +166,15 @@ async def init(_queue_query: Callable[str], _get_response: Callable[None]):
     
     # Start both tasks with proper cancellation handling
     try:
+        loop = asyncio.get_running_loop()
+        def on_ctrl_c():
+            global interrupts
+            interrupts += 1
+            if interrupts >= 2:
+                raise KeyboardInterrupt
+            #print("\nCtrl+C ignored, still running. Use kill or another method to stop.")
+            asyncio.run_coroutine_threadsafe(set_interrupt("0"), loop)
+        loop.add_signal_handler(signal.SIGINT, on_ctrl_c)
         await asyncio.gather(write_output(), read_input())
     except asyncio.CancelledError:
         logger.info("Terminal init cancelled")

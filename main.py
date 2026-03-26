@@ -297,10 +297,16 @@ async def run_tool_loop(
     session_id: SessionID
 ) -> str:
     """Stream messages, handle tool calls in a loop, return final text."""
+    global interrupts
     max_calls = 60
     tool_counter = 0
 
     while True:
+        if user_id in interrupts and interrupts[user_id]:
+            del interrupts[user_id]
+            emit(user_id, "info", "Interrupted. What can I help you with?")
+            break
+
         tools, registry = build_tools()
         chunks = stream_chat_completion(base_url, messages, tools, session_id)
 
@@ -595,15 +601,21 @@ from typing import Dict, List, Tuple
 
 queries = asyncio.Queue()
 responses = asyncio.Queue()
-
+interrupts = {}
 
 async def queue_query(user_id: UserID, query: str) -> None:
     global queries
     await queries.put((user_id, query))
 
 
-async def get_reponse() -> Tuple[str, str, str, bool]:
+async def get_reponse() -> Tuple[UserID, str, str, bool]:
     return await responses.get()
+
+
+async def set_interrupt(user_id: UserID) -> None:
+    global interrupts
+    interrupts[user_id] = True
+
 
 #  USER DATABASE
 UserID = str
@@ -624,6 +636,7 @@ async def main(
     on_ready: Callable = None,
     resume: bool = False
 ) -> None:
+    global interrupts
     """Run the conversation loop, using the provided I/O callbacks."""
     # Load from environment variables if not provided
     base_url = os.getenv("LLAMA_BASE_URL")
@@ -632,7 +645,7 @@ async def main(
     # Try starting llama-server in background with fallback to setup.sh
     print("Attempting to start llama-server via start_llama.sh...")
     global llama_proc
-    llama_proc = subprocess.Popen("./start_llama.sh", shell=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    llama_proc = subprocess.Popen("./start_llama.sh", shell=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True)
     await asyncio.sleep(2)  # Wait briefly for it to start/fail without blocking
     if llama_proc.poll() is None:
         print("start_llama.sh started successfully")
@@ -659,6 +672,7 @@ async def main(
                 await asyncio.sleep(0.1)
                 on_ready()
                 user_id, user_input = await queries.get()
+                if user_id in interrupts: del interrupts[user_id]
             except asyncio.CancelledError:
                 print("Main loop cancelled", file=sys.stderr)
                 break
@@ -713,7 +727,7 @@ async def async_main(client_type: str, resume: bool = False):
         raise ValueError(f"Unknown client type: {client_type}")
     
     # Create tasks for proper cancellation
-    init_task = asyncio.create_task(client.init(queue_query, get_reponse))
+    init_task = asyncio.create_task(client.init(queue_query, get_reponse, set_interrupt))
     main_task = asyncio.create_task(main(on_ready=client.on_ready, resume=resume))
     
     try:

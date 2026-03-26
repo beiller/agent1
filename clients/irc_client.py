@@ -28,6 +28,7 @@ import time
 
 queue_query: Callable[[str, str], None] = None
 get_response: Callable[None, Tuple[str, str, str, bool]] = None
+set_interrupt = Callable[[str], None] = None
 
 
 def rate_limit(calls, period=10):
@@ -143,10 +144,15 @@ def on_ready():
 def stop():
     pass
 
-async def init(_queue_query: Callable[[str, str], None], _get_response: Callable[None, Tuple[str, str, str, bool]]):
-    global queue_query, get_response
+async def init(
+    _queue_query: Callable[[str, str], None], 
+    _get_response: Callable[None, Tuple[str, str, str, bool]],
+    _set_interrupt: Callable[[str], None]
+    ):
+    global queue_query, get_response, set_interrupt
     queue_query = _queue_query
     get_response = _get_response
+    set_interrupt = _set_interrupt
 
     await asyncio.gather(
         digest_agent_response(), 
