@@ -505,7 +505,7 @@ async def main(
                 break
             except KeyboardInterrupt:
                 print(file=sys.stderr)
-                emit("info", "Cancelled")
+                emit(user_id, "info", "Cancelled")
     except Exception as e:
         logger.error(f"Main loop error: {e}")
         raise
