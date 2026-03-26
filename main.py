@@ -79,6 +79,13 @@ from download_model import download_model
 # ---------------------------------------------------------------------------
 
 from main_types import * 
+from conversation import (
+    approximate_token_count,
+    archive_conversation,
+    write_conversation,
+    read_conversation,
+    get_last_conversation_session_id,
+)
 
 # ---------------------------------------------------------------------------
 # Pure constructors
@@ -358,12 +365,6 @@ async def run_tool_loop(
             assistant_msg_with_ts = {"role": "assistant", "content": text, "timestamp": datetime.now().isoformat()}
             messages.append(assistant_msg_with_ts)
             return text
-
-
-def approximate_token_count(text: str) -> int:
-    # Rough estimate: ~4 characters per token for English text
-    return int(len(text) / 4)
- 
 async def handle_message(
     user_input: str,
     base_url: str,
@@ -399,48 +400,6 @@ async def handle_message(
     write_conversation(session_id, messages)
 
 
-# ---------------------------------------------------------------------------
-# Conversation helpers
-# ---------------------------------------------------------------------------
-
-CONVERSATION_DIR = './conversations/'
-
-
-def archive_conversation(session_id: str, messages: List[Message]):
-    filename = datetime.now().strftime("%Y%m%d_%H%M%S") + "_" + session_id + ".txt"
-    archive_text = ""
-    for message in messages:
-        if message['role'] in ['tool', ] : continue
-        if 'timestamp' in message and message['timestamp']: archive_text += '[' + message['timestamp'] + '] '
-        archive_text += message['role'] + ":\n"
-        if 'content' in message and message['content']: archive_text += message['content'] + "\n"
-        if 'tool_calls' in message and message['tool_calls']: archive_text += json.dumps(message['tool_calls']) + "\n"
-        archive_text += "\n"
-
-    with open(CONVERSATION_DIR+filename, 'w') as fh:
-        fh.write(archive_text)
-
-    return CONVERSATION_DIR+filename
-
-
-def write_conversation(session_id: str, messages: List[Message]):
-    with open(CONVERSATION_DIR+session_id+'.json', 'w') as fh:
-        json.dump(messages, fh)
-
-
-def read_conversation(session_id: str) -> List[Message]:
-    with open(CONVERSATION_DIR+session_id+'.json') as fh:
-        return json.load(fh)
-
-
-def get_last_conversation_session_id() -> SessionID:
-    files = [f for f in pathlib.Path(CONVERSATION_DIR).iterdir() if f.is_file() and f.name.endswith(".json")]
-    session_id: SessionID = max(files, key=lambda f: f.stat().st_mtime).name.split('/')[-1].split('.')[0]
-    logger.info("Resuming session: " + session_id)
-    return session_id
-
-
-# ---------------------------------------------------------------------------
 # Skill loader – turns skills/*.md into tools
 # ---------------------------------------------------------------------------
 
@@ -512,8 +471,6 @@ async def set_interrupt(user_id: UserID) -> None:
 
 
 #  USER DATABASE
-UserID = str
-SessionID = str
 def init_registry() -> Tuple[Callable[[UserID], list[Message]], Callable[[UserID, list[Messages]], None]]:
     user_registry: Dict[UserID, list[Message]] = {}
 

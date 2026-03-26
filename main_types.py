@@ -120,3 +120,7 @@ class ToolHandler(Protocol):
 Emitter = Callable[[str, str], None]
 EmitToken = Callable[[str], None]
 ReadInput = Callable[[], str | None]
+
+
+SessionID = str
+UserID = str
