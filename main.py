@@ -434,6 +434,7 @@ def init_registry() -> Tuple[Callable[[UserID], list[Message]], Callable[[UserID
 
 get_user_messages, set_user_messages = init_registry()
 
+
 async def main(
     on_ready: Callable = None,
     resume: bool = False
@@ -449,16 +450,16 @@ async def main(
     llama_proc = None
     
     if is_llama_running(base_url):
-        print("llama-server is already running, skipping start")
+        logger.info("llama-server is already running, skipping start")
     else:
         # Try starting llama-server in background with fallback to setup.sh
-        print("Attempting to start llama-server via start_llama.sh...")
+        logger.info("Attempting to start llama-server via start_llama.sh...")
         llama_proc = subprocess.Popen("./start_llama.sh", shell=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True)
         await asyncio.sleep(2)  # Wait briefly for it to start/fail without blocking
         if llama_proc.poll() is None:
-            print("start_llama.sh started successfully")
+            logger.info("start_llama.sh started successfully")
         else:
-            print(f"start_llama.sh exited with code {llama_proc.returncode}, trying setup.sh once...")
+            logger.warning(f"start_llama.sh exited with code {llama_proc.returncode}, trying setup.sh once...")
             subprocess.run(["./setup.sh"], shell=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     
     #messages: list[Message] = []
@@ -482,10 +483,9 @@ async def main(
                 user_id, user_input = await queries.get()
                 if user_id in interrupts: del interrupts[user_id]
             except asyncio.CancelledError:
-                print("Main loop cancelled", file=sys.stderr)
+                logger.warning("Main loop cancelled")
                 break
             except KeyboardInterrupt:
-                print(file=sys.stderr)
                 break
             
             # load the conversation up it memory once
@@ -502,10 +502,9 @@ async def main(
                     user_input, base_url, user_id, session_id
                 )
             except asyncio.CancelledError:
-                print("Message handling cancelled", file=sys.stderr)
+                logger.warning("Message handling cancelled")
                 break
             except KeyboardInterrupt:
-                print(file=sys.stderr)
                 emit(user_id, "info", "Cancelled")
     except Exception as e:
         logger.error(f"Main loop error: {e}")
@@ -518,9 +517,9 @@ async def main(
                     llama_proc.wait(timeout=3)
                 except subprocess.TimeoutExpired:
                     llama_proc.kill()
-                print("llama-server stopped")
+                logger.info("llama-server stopped")
             except Exception as e:
-                print(f"Stopping llama-server: {e}")
+                logger.error(f"Stopping llama-server: {e}")
 
 
 async def async_main(client_type: str, resume: bool = False):
@@ -534,11 +533,21 @@ async def async_main(client_type: str, resume: bool = False):
     else:
         raise ValueError(f"Unknown client type: {client_type}")
     
-    # Create tasks for proper cancellation
+
+    # 1. Create your two tasks
     init_task = asyncio.create_task(client.init(queue_query, get_reponse, set_interrupt))
     main_task = asyncio.create_task(main(on_ready=client.on_ready, resume=resume))
-    
+    tasks = {init_task, main_task}
+
     try:
+        done, pending = await asyncio.wait(
+            tasks, 
+            return_when=asyncio.FIRST_COMPLETED
+        )
+        for task in pending:
+            task.cancel()
+        if pending:
+            await asyncio.gather(*pending, return_exceptions=True)
         await asyncio.gather(init_task, main_task)
     except asyncio.CancelledError:
         logger.info("Received cancellation, cleaning up tasks...")

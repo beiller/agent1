@@ -1,109 +1,103 @@
-"""Terminal plugin – provides display and input callbacks for the server."""
 
-from __future__ import annotations
 
-import readline  # noqa: F401 – enables arrow-key / history in input()
-import sys
+import base64
+import re
+from io import BytesIO
+from PIL import Image
+from textual.app import App, ComposeResult
+from textual.widgets import Input, RichLog
+from textual.events import Paste
 import asyncio
+import signal
 import logging
 
 logger = logging.getLogger()
 
-queue_query: Callable[str] = None
-get_response: Callable[None] = None
+queue_query: Callable = None
+get_response: Callable = None
+set_interrupt: Callable = None
+app = None
 _shutdown_event = asyncio.Event()
 
 
-def _ansi(code: str) -> str:
-    return f"\033[{code}m"
-
-RESET = _ansi("0")
-BOLD = _ansi("1")
-DIM = _ansi("2")
-BRIGHT_CYAN = _ansi("96")
-BRIGHT_GREEN = _ansi("92")
-YELLOW = _ansi("33")
-BRIGHT_MAGENTA = _ansi("95")
-RED = _ansi("31")
-GRAY = _ansi("90")
-
-UP_1_LINE = "\033[A"
-
-_STYLE_MAP: dict[str, tuple[str, str]] = {
-    "assistant": (BRIGHT_CYAN, "assistant"),
-    "info": (YELLOW, "info"),
-    "skill": (BRIGHT_GREEN, "skill"),
-    "tool": (BRIGHT_MAGENTA, "tool"),
-    "error": (RED, "error"),
-}
-
-SEP = f"{GRAY}{'─' * 40}{RESET}"
+from textual.widgets import Static, Input, Markdown
+from textual.containers import VerticalScroll
 
 
-def emit(prefix: str, text: str) -> None:
-    """Print a styled, prefixed message to stderr."""
-    color, label = _STYLE_MAP.get(prefix, (RESET, prefix))
 
-    if prefix == "assistant":
-        print(
-            f"{color}┌── 🤖 {BOLD}{label}{RESET}{color} ─────────────────{RESET}",
-            file=sys.stderr,
-        )
-        for line in text.splitlines():
-            print(f"{color}│{RESET} {line}", file=sys.stderr)
-        print(f"{color}└───────────────────────────────{RESET}", file=sys.stderr)
-    else:
-        tag = f"{color}{BOLD}▸ {label}{RESET}"
-        lines = text.splitlines()
-        first, rest = lines[0], lines[1:]
-        print(f" {tag} {color}{first}{RESET}", file=sys.stderr)
-        indent = "    "
-        for line in rest:
-            print(f" {indent}{color}{line}{RESET}", file=sys.stderr)
+class ChatApp(App):
+    STATE_STREAMING = "streaming"
+    STATE_IDLE = "idle"
+    async def on_mount(self):
+        # This ensures the input is ready for typing immediately
+        self.query_one(Input).focus()
+
+        container = self.query_one("#chat_container")
+        await container.mount(Static(f"[bold cyan]✦  C H A T[/]"))
+        await container.mount(Static(f"[grey]Local AI Assistant[/]"))
+
+        self.state = ChatApp.STATE_IDLE
+
+        self.run_worker(write_output())
+
+    def compose(self) -> ComposeResult:
+        # Use a scrollable container for the chat history
+        yield VerticalScroll(id="chat_container")
+        yield Input(placeholder="Type here...")
 
 
-def print_prompt():
-    prompt = "> "
-    sys.stderr.write(f"{BOLD}{BRIGHT_GREEN}{prompt}{RESET}")
-    sys.stderr.flush()
+    async def on_input_submitted(self, event: Input.Submitted) -> None:
+        if not event.value.strip(): return
+        container = self.query_one("#chat_container")
+        await container.mount(Static(f"[bold cyan]You:[/][white] {event.value}[/]"))
+        await queue_query("0", event.value)
+        event.input.value = ""
 
-async def ainput(string: str) -> str:
-    await asyncio.get_event_loop().run_in_executor(
-            None, lambda s=string: sys.stdout.write(s+' '))
-    return await asyncio.get_event_loop().run_in_executor(
-            None, sys.stdin.readline)
 
-async def read_input() -> str | None:
-    """Read user input and queue queries. Handles shutdown gracefully."""
-    global interrupts
-    logger.info("Starting input reader...")
-    try:
-        while not _shutdown_event.is_set():
-            try:
-                user_prompt = await ainput("")
-                await queue_query("0", user_prompt)
-                interrupts = 0
-            except asyncio.TimeoutError:
-                # Check if we should shutdown
-                if _shutdown_event.is_set():
-                    break
-                continue
-            except EOFError:
-                logger.info("EOF received, shutting down input reader")
-                print(f"\n{SEP}", file=sys.stderr)
-                break
-            except asyncio.CancelledError:
-                logger.info("Input reader cancelled")
-                break
-    except Exception as e:
-        logger.error(f"Error in read_input: {e}")
-        raise
-    finally:
-        print(f"{RESET}\n", file=sys.stderr)
+    async def debug(self, text):
+        container = self.query_one("#chat_container")
+        await container.mount(Static(text))
+
+
+    async def create_container(self, markdown=False):
+        container = self.query_one("#chat_container")
+        widget = Markdown("") if markdown else Static("")
+        await container.mount(widget)
+        self.current_response = widget
+
+
+    async def on_llm_text(self, user_id, role, token, chunk):
+        """Now you can append tokens without a newline!"""
+        if self.state == ChatApp.STATE_IDLE:
+            if chunk:
+                self.state = ChatApp.STATE_STREAMING
+                self.current_text = ""
+                await self.create_container(markdown=True)
+            else:
+                await self.create_container(markdown=False)
+        
+        if self.state == ChatApp.STATE_STREAMING and not chunk and token == "":
+            self.state = ChatApp.STATE_IDLE
+            return
+
+        if self.state == ChatApp.STATE_STREAMING:
+            self.current_text += token
+            new_content = self.current_text
+        else:
+            new_content = f"[bold magenta]{role} 🤖:[/][white] {token}[/]"
+
+        self.current_response.update(new_content)
+
+
+    # async def on_paste(self, event: Paste) -> None:
+    #     file_path = event.text.strip().replace("file://", "")
+    #     await self.debug(file_path)
+    #     return
 
 
 async def write_output():
     """Write output responses. Handles shutdown gracefully."""
+    global app
     logger.info("Starting output writer...")
     try:
         while not _shutdown_event.is_set():
@@ -113,69 +107,52 @@ async def write_output():
                     get_response(),
                     timeout=0.5
                 )
-                color, label = _STYLE_MAP.get(role, (RESET, role))
-                if token != "":
-                    sys.stderr.write(f"{color}{token}{RESET}")
-                if not chunk:
-                    sys.stderr.write(f"\n")
-
-                sys.stderr.flush()
+                asyncio.run_coroutine_threadsafe(app.on_llm_text(user_id, role, token, chunk), asyncio.get_event_loop())
             except asyncio.TimeoutError:
                 # Check if we should shutdown
                 continue
             except asyncio.CancelledError:
                 logger.info("Output writer cancelled")
                 break
+            await asyncio.sleep(0.01)
     except Exception as e:
         logger.error(f"Error in write_output: {e}")
         raise
-    finally:
-        sys.stderr.write(f"{RESET}\n")
-        sys.stderr.flush()
-
-
-def print_banner() -> None:
-    print(file=sys.stderr)
-    print(f"  {BOLD}{BRIGHT_CYAN}✦  C H A T{RESET}", file=sys.stderr)
-    print(f"  {DIM}Local AI Assistant{RESET}", file=sys.stderr)
-    print(file=sys.stderr)
 
 
 def on_ready():
-    print_prompt()
+    #print_prompt()
+    pass
 
 
 def stop():
     """Signal shutdown and clean up terminal state."""
     logger.info("Stopping terminal...")
     _shutdown_event.set()
-    sys.stderr.write(f"{RESET}\n")
-    print(f"{RESET}", file=sys.stderr)
-    # Reset terminal colors
-    sys.stderr.write("\033[0m")
-    sys.stderr.flush()
 
-import signal
-interrupts = 0
-async def init(_queue_query: Callable[[str], None], _get_response: Callable[None, [str, str, str, bool]], set_interrupt: Callable[[str, ], None]):
+
+def on_ctrl_c():
+    global queue_query, get_response, set_interrupt
+    #print("\nCtrl+C ignored, still running. Use kill or another method to stop.")
+    asyncio.run_coroutine_threadsafe(set_interrupt("0"), loop)
+
+
+async def run_ui():
+    global app
+    app = ChatApp()
+    await app.run_async()
+
+
+async def init(_queue_query: Callable[[str], None], _get_response: Callable[None, [str, str, str, bool]], _set_interrupt: Callable[[str, ], None]):
     """Initialize the terminal client and start I/O tasks."""
-    global queue_query, get_response
+    global queue_query, get_response, set_interrupt
     queue_query = _queue_query
     get_response = _get_response
-    print_banner()
+    set_interrupt = _set_interrupt
     
     # Start both tasks with proper cancellation handling
     try:
-        loop = asyncio.get_running_loop()
-        def on_ctrl_c():
-            global interrupts
-            interrupts += 1
-            if interrupts >= 2:
-                raise KeyboardInterrupt
-            #print("\nCtrl+C ignored, still running. Use kill or another method to stop.")
-            asyncio.run_coroutine_threadsafe(set_interrupt("0"), loop)
-        loop.add_signal_handler(signal.SIGINT, on_ctrl_c)
-        await asyncio.gather(write_output(), read_input())
+        await run_ui()
     except asyncio.CancelledError:
         logger.info("Terminal init cancelled")
         stop()

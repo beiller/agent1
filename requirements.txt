@@ -37,3 +37,4 @@ scikit-learn==1.8.0
 scipy==1.17.1
 threadpoolctl==3.6.0
 huggingface_hub==1.7.2
+textual==8.2.0
