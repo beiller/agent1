@@ -5,6 +5,7 @@ import re
 from typing import List, Dict, Optional
 import json
 import argparse
+import subprocess
 
 try:
     from tqdm import tqdm
@@ -178,24 +179,25 @@ def scan_directory(directory: str, depth: int = 8) -> List[str]:
     
     return sorted(text_files)
 
-def pre_filter_documents(file_contents: Dict[str, str], query: str) -> List[str]:
-    query_words = re.findall(r'\b[a-zA-Z0-9]{3,}\b', query.lower())
+def pre_filter_documents(file_paths: List[str], query: str) -> List[str]:
+    words = re.findall(r'\b[a-zA-Z0-9]{3,}\b', query.lower())
     
-    if not query_words:
-        return list(file_contents.keys())
+    if not words:
+        return file_paths
     
-    matching_files = []
+    # OR pattern: match if ANY word exists
+    pattern = '|'.join(re.escape(w) for w in words)
     
-    for filepath, doc_content in file_contents.items():
-        content_lower = doc_content.lower()
-        
-        if any(word in content_lower for word in query_words):
-            matching_files.append(filepath)
-    
-    return matching_files
+    matching = []
+    for fp in file_paths:
+        result = subprocess.run(['grep', '-qiE', pattern, fp], 
+                                capture_output=True)
+        if result.returncode == 0:
+            matching.append(fp)
+    return matching
 
 def build_database(directory: str = "conversations", depth: int = 8, 
-                   pre_filter_query: Optional[str] = None) -> Dict:
+                   pre_filter_query: Optional[str] = None, extension="") -> Dict:
     db = create_store()
     
     text_files = scan_directory(directory, depth)
@@ -203,8 +205,16 @@ def build_database(directory: str = "conversations", depth: int = 8,
     if not text_files:
         return db
     
+    if pre_filter_query:
+        matching_files = pre_filter_documents(text_files, pre_filter_query)
+        files_to_process = matching_files
+    else:
+        files_to_process = text_files
+    
     file_contents = {}
-    for filepath in tqdm(text_files, desc="Loading files", disable=not HAS_TQDM):
+    for filepath in tqdm(files_to_process, desc="Loading files", disable=not HAS_TQDM):
+        if not (extension != "" and filepath.lower().endswith(extension.lower())):
+            continue
         try:
             with open(filepath, 'r', encoding='utf-8') as f:
                 content = f.read()
@@ -212,16 +222,11 @@ def build_database(directory: str = "conversations", depth: int = 8,
         except Exception as e:
             print(f"WARNING: Could not read {filepath}: {e}")
     
-    if pre_filter_query:
-        matching_files = pre_filter_documents(file_contents, pre_filter_query)
-        files_to_process = matching_files
-    else:
-        files_to_process = list(file_contents.keys())
-    
     for filepath in tqdm(files_to_process, desc="Processing", disable=not HAS_TQDM):
-        content = file_contents[filepath]
-        rel_path = os.path.relpath(filepath, directory)
-        add(db, content, rel_path)
+        if filepath in file_contents:
+            content = file_contents[filepath]
+            rel_path = os.path.relpath(filepath, directory)
+            add(db, content, rel_path)
     
     print(f"Done! {len(db['chunks'])} chunks ready")
     return db
@@ -280,9 +285,12 @@ def search_database(db: Dict, keyword: str, context_window: int, top_k: int,
     
     return json.dumps(final_results, indent=2)
 
-def vector_search(keyword_to_search: str, context_size: int = 128, top_k_docs: int = 3, 
-                  top_j_per_doc: int = 2, directory: str = "conversations", depth: int = 8) -> str:
-    db = build_database(directory, depth, pre_filter_query=keyword_to_search)
+def vector_search(
+    keyword_to_search: str, context_size: int = 128, 
+    top_k_docs: int = 3, top_j_per_doc: int = 2, 
+    directory: str = "conversations", depth: int = 8,
+    extension="") -> str:
+    db = build_database(directory, depth, pre_filter_query=keyword_to_search, extension=extension)
     results = search_database(db, keyword_to_search, context_size, top_k_docs, top_j_per_doc, directory)
     return results
 
@@ -301,6 +309,9 @@ if __name__ == "__main__":
                         help='Number of top documents (default: 3)')
     parser.add_argument('-j', '--top-j', type=int, default=2,
                         help='Number of matches per document (default: 2)')
+    parser.add_argument('-e', '--extension', type=str, default="",
+                        help='File extension to match')
+    
     
     args = parser.parse_args()
     
@@ -314,7 +325,8 @@ if __name__ == "__main__":
         top_k_docs=args.top_k,
         top_j_per_doc=args.top_j,
         directory=args.directory,
-        depth=args.depth
+        depth=args.depth,
+        extension=args.extension
     )
     
     print(results)
