@@ -7,7 +7,7 @@ import subprocess
 import urllib.request
 from typing import List
 import pathlib
-from main_types import Message
+from main_types import *
 
 
 

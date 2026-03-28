@@ -3,7 +3,6 @@
 import base64
 import re
 from io import BytesIO
-from PIL import Image
 from textual.app import App, ComposeResult
 from textual.widgets import Input, RichLog
 from textual.events import Paste
@@ -11,11 +10,13 @@ import asyncio
 import signal
 import logging
 
+from typing import Callable
+
 logger = logging.getLogger()
 
-queue_query: Callable = None
-get_response: Callable = None
-set_interrupt: Callable = None
+queue_query = None
+get_response = None
+set_interrupt = None
 app = None
 _shutdown_event = asyncio.Event()
 
@@ -143,7 +144,7 @@ async def run_ui():
     await app.run_async()
 
 
-async def init(_queue_query: Callable[[str], None], _get_response: Callable[None, [str, str, str, bool]], _set_interrupt: Callable[[str, ], None]):
+async def init(_queue_query: Callable, _get_response: Callable, _set_interrupt: Callable):
     """Initialize the terminal client and start I/O tasks."""
     global queue_query, get_response, set_interrupt
     queue_query = _queue_query

@@ -435,10 +435,9 @@ def init_registry() -> Tuple[Callable[[UserID], list[Message]], Callable[[UserID
 get_user_messages, set_user_messages = init_registry()
 
 
-async def main(
-    on_ready: Callable = None,
+async def main_init(
     resume: bool = False
-) -> None:
+) -> SessionID:
     global interrupts
     """Run the conversation loop, using the provided I/O callbacks."""
     # Load from environment variables if not provided
@@ -469,12 +468,20 @@ async def main(
     session_id = ''.join(random.choices(string.ascii_lowercase + string.digits, k=8))
     if resume:
         session_id = get_last_conversation_session_id()
-        #set_user_messages(read_conversation(session_id))
 
     session_resumed = False
-
+    logger.info(f"Loading model {CURRENT_MODEL}")
     load_model_and_set(CURRENT_MODEL)
+    await asyncio.sleep(3)
+    return session_id
 
+
+async def main(
+    on_ready: Callable = None,
+    resume: bool = False,
+    session_id = None,
+) -> None:
+    base_url = os.getenv("LLAMA_BASE_URL")
     try:
         while True:
             try:
@@ -534,9 +541,11 @@ async def async_main(client_type: str, resume: bool = False):
         raise ValueError(f"Unknown client type: {client_type}")
     
 
+    session_id = await main_init(resume=resume)
+
     # 1. Create your two tasks
     init_task = asyncio.create_task(client.init(queue_query, get_reponse, set_interrupt))
-    main_task = asyncio.create_task(main(on_ready=client.on_ready, resume=resume))
+    main_task = asyncio.create_task(main(on_ready=client.on_ready, resume=resume, session_id=session_id))
     tasks = {init_task, main_task}
 
     try:
