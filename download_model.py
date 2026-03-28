@@ -3,9 +3,10 @@
 Script to download a GGUF model from Hugging Face.
 Uses local_dir to get a clean copy instead of cache symlinks.
 """
-
+import json
 import os
 from pathlib import Path
+from dataclasses import asdict
 
 
 def check_huggingface_hub():
@@ -17,6 +18,15 @@ def check_huggingface_hub():
         print("❌ huggingface_hub not installed!")
         print("   Install it with: pip install huggingface_hub")
         return False
+
+
+
+def search_model(search_query: str, limit: int = 10):
+    """Search huggingface for a model"""
+    from huggingface_hub import list_models
+
+    models = [asdict(m) for m in list_models(search=search_query, limit=limit)]
+    return json.dumps({"result": models}, default=str)
 
 
 def download_model(

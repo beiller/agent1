@@ -63,6 +63,10 @@ from tools import (
     make_tool
 )
 
+# Import vector_search and download_model from their modules
+from vector_search import vector_search
+from download_model import download_model, search_model
+
 
 
 CURRENT_MODEL = os.environ.get("CURRENT_MODEL", "Qwen_Qwen3.5-27B-Q4_1")
@@ -81,10 +85,6 @@ def load_model_and_set(model_name: str):
     global CURRENT_MODEL
     load_model(model_name)
     CURRENT_MODEL = model_name
-
-# Import vector_search and download_model from their modules
-from vector_search import vector_search
-from download_model import download_model
 
 # ---------------------------------------------------------------------------
 # Types – Chat Completions API
@@ -297,7 +297,7 @@ def build_tools() -> tuple[list[Tool], dict[str, ToolHandler]]:
     """Build the full tools list and registry by reloading skills from disk."""
     tools: list[Tool] = [tool_from_function(run_bash), tool_from_function(vector_search), tool_from_function(download_model),
                            tool_from_function(load_model), tool_from_function(unload_model), 
-                           tool_from_function(list_models)]
+                           tool_from_function(list_models), tool_from_function(search_model)]
     registry: dict[str, ToolHandler] = {
         "run_bash": run_bash,
         "vector_search": vector_search,
@@ -305,6 +305,7 @@ def build_tools() -> tuple[list[Tool], dict[str, ToolHandler]]:
         "load_model": load_model_and_set,
         "unload_model": unload_model,
         "list_models": list_models,
+        "search_model": search_model
     }
     skill_tools, skill_registry = load_skills(SKILLS_DIR)
     tools.extend(skill_tools)
