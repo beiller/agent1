@@ -51,6 +51,7 @@ class ChatApp(App):
         if not event.value.strip(): return
         container = self.query_one("#chat_container")
         await container.mount(Static(f"[bold cyan]You:[/][white] {event.value}[/]"))
+        container.scroll_end(animate=False)
         await queue_query("0", event.value)
         event.input.value = ""
 
@@ -58,6 +59,7 @@ class ChatApp(App):
     async def debug(self, text):
         container = self.query_one("#chat_container")
         await container.mount(Static(text))
+        container.scroll_end(animate=False)
 
 
     async def create_container(self, markdown=False):
