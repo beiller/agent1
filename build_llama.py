@@ -212,7 +212,7 @@ def main():
     
     build_llama()
 
-    if ask_user("\nWould you like to download the Qwen3.5-27B-Q4_K_M model now?"):
+    if ask_user("\nWould you like to download a model now?"):
         print("\n🚀 Running download_model.py...")
         try:
             subprocess.run([sys.executable, "download_model.py"], check=True)

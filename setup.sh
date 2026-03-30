@@ -82,5 +82,5 @@ python build_llama.py
 log_info ""
 log_info "=========================================="
 log_info "✅ Setup completed successfully!"
-log_info "Run: `source venv/bin/activate && python main.py` to start"
+log_info "Run: source venv/bin/activate && python main.py to start"
 log_info "=========================================="

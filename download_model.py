@@ -30,8 +30,8 @@ def search_model(search_query: str, limit: int = 10):
 
 
 def download_model(
-    repo_id: str = "bartowski/Qwen_Qwen3.5-27B-GGUF", 
-    filename: str = "Qwen_Qwen3.5-27B-Q4_K_M.gguf"
+    repo_id: str = "bartowski/Qwen_Qwen3.5-9B-GGUF", 
+    filename: str = "Qwen_Qwen3.5-9B-Q4_K_M.gguf"
 ):
     """Download a GGUF model from Hugging Face. Provide the repo_id and filename. Feel free to search huggingface first (curl) to find the appropriate values. """
     from huggingface_hub import hf_hub_download
