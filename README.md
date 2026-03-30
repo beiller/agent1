@@ -181,20 +181,32 @@ All `.txt` files in the `conversations/` directory are automatically included in
 ```
 .
 ├── main.py              # Entry point
+├── main_types.py        # Type definitions
 ├── server.py            # Core message handling
-├── terminal.py          # Terminal client
-├── discord_client.py    # Discord integration
-├── irc_client.py        # IRC integration
+├── conversation.py      # Conversation management
+├── tools.py             # Tool definitions and skill loading
 ├── vector_search.py     # Conversation search
 ├── config.json          # Configuration
 ├── requirements.txt     # Python dependencies
-├── setup.sh            # 🚀 One-click setup script
+├── setup.sh            # One-click setup script
 ├── build_llama.py      # llama.cpp build script
-├── skills/              # Skill definitions (.md files)
-│   ├── run_bash.md
-│   ├── curl.md
-│   └── mux.md
-└── conversations/       # Stored conversation history (.txt files)
+├── download_model.py   # Model download utility
+├── start_llama.sh      # Script to start llama-server
+├── podman-compose.yaml # Container orchestration
+├── .env                # Environment variables (custom)
+├── .env.example        # Environment template
+├── Dockerfile          # Container build config
+├── clients/            # Client implementations
+│   ├── __init__.py
+│   ├── terminal.py     # Terminal client
+│   ├── discord_client.py # Discord integration
+│   └── irc_client.py   # IRC integration
+├── skills/             # Skill definitions (.md files)
+│   ├── curl.md         # URL fetching skill
+│   └── mux.md          # Background task skill
+├── conversations/      # Stored conversation history (.txt and .json files)
+├── llama.cpp/          # llama.cpp source (built during setup)
+└── opencode/           # opencode source (built during setup)
 ```
 
 ## Extending
