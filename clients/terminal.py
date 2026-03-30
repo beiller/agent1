@@ -90,7 +90,8 @@ class ChatApp(App):
             new_content = f"[bold magenta]{role} 🤖:[/][white] {token}[/]"
 
         self.current_response.update(new_content)
-
+        container = self.query_one("#chat_container")
+        container.scroll_end(animate=False)
 
     # async def on_paste(self, event: Paste) -> None:
     #     file_path = event.text.strip().replace("file://", "")
