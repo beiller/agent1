@@ -19,7 +19,6 @@ git clone https://github.com/your-repo/agent1.git
 cd agent1
 
 # Run the one-click setup script
-chmod +x setup.sh
 ./setup.sh
 
 # Start the server
@@ -41,7 +40,19 @@ The setup script handles most prerequisites, but you should have:
 - Git installed
 - (Optional) NVIDIA GPU with CUDA for faster inference
 
-### Option 1: Local Python Environment (After Setup)
+### Option 1: Podman Container (requires podman or docker)
+
+**Start llama-server**
+./llama_server.sh &
+
+Edit the script if you use docker.
+
+```bash
+# WARNING: Uses host network (insecure but more secure than filesystem access)
+./agent1.sh
+```
+
+### Option 2: Local Python Environment (After Setup) (Dangerous)
 
 ```bash
 # Activate virtual environment
@@ -51,12 +62,6 @@ source venv/bin/activate
 python main.py terminal
 ```
 
-### Option 2: Podman Container
-
-```bash
-# WARNING: Uses host network (insecure but more secure than filesystem access)
-podman-compose up
-```
 
 ## Configuration
 
@@ -77,6 +82,43 @@ Simply copy `.env.example` to `.env` and modify as needed:
 ```bash
 cp .env.example .env  # Optional: customize your settings
 ```
+
+## Available Commands
+
+To use a command just ask in a natural language, like "Run this bash command: ls -l" for example. 
+
+The following commands are available for use:
+
+1. **run_bash** - Run a bash command and return its output.
+   - Parameters: `command` (string) - The command to run
+
+2. **download_model** - Download a GGUF model from Hugging Face.
+   - Parameters: `repo_id` (string), `filename` (string) - Provide the repo_id and filename
+
+3. **load_model** - Load a specific model into llama-server router mode via its API.
+   - Requires llama-server to be running in router mode
+   - Parameters: `model_name` (string) - Name or path of the model to load
+   - Returns: JSON string with success status and details
+
+4. **unload_model** - Unload a specific model from llama-server router mode via its API.
+   - Parameters: `model_name` (string) - Name or path of the model to unload
+   - Returns: JSON string with success status and details
+
+5. **list_models** - List all available models in llama-server router mode.
+   - Returns: JSON string with list of models and their status
+
+6. **search_model** - Search HuggingFace for a model.
+   - Parameters: `search_query` (string), `limit` (integer, optional)
+
+7. **reset_session** - Reset the session and chat history.
+   - Parameters: `user_id` (string), `session_id` (string)
+
+8. **curl_skill** - Fetch a webpage URL and return its contents.
+   - Parameters: `command` (string) - The command to run
+
+9. **mux_skill** - Start a long-running command in a background tmux session.
+   - Parameters: `command` (string) - The command to run
+   - Useful for running multiple processes in parallel
 
 ## High-Level Components
 

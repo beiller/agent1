@@ -151,13 +151,14 @@ async def stream_chat_completion(
     base_url: str,
     messages: list[Message],
     tools: list[Tool], 
-    session_id: SessionID
+    session_id: SessionID,
+    user_id: UserID
 ) -> AsyncIterator[ChatCompletionChunk]:
     """Send a streaming chat completion request, yielding SSE chunks asynchronously."""
     system_content = SYSTEM_MD.read_text() if SYSTEM_MD.exists() else ""
     
     # Add dynamic context to system prompt
-    session_context = f"\n\nCurrent time: {datetime.now().isoformat()}\nCurrent working directory: {os.getcwd()}\nActive session: {session_id}\n"
+    session_context = f"\n\nCurrent time: {datetime.now().isoformat()}\nCurrent working directory: {os.getcwd()}\nActive session: {session_id}Active user_id: {user_id}\n\n"
     system_content += session_context
 
     # Strip timestamps before sending to LLM API
@@ -295,14 +296,16 @@ def build_tools() -> tuple[list[Tool], dict[str, ToolHandler]]:
     """Build the full tools list and registry by reloading skills from disk."""
     tools: list[Tool] = [tool_from_function(run_bash), tool_from_function(download_model),
                            tool_from_function(load_model), tool_from_function(unload_model), 
-                           tool_from_function(list_models), tool_from_function(search_model)]
+                           tool_from_function(list_models), tool_from_function(search_model),
+                           tool_from_function(reset_session)]
     registry: dict[str, ToolHandler] = {
         "run_bash": run_bash,
                 "download_model": download_model,
         "load_model": load_model_and_set,
         "unload_model": unload_model,
         "list_models": list_models,
-        "search_model": search_model
+        "search_model": search_model,
+        "reset_session": reset_session,
     }
     skill_tools, skill_registry = load_skills(SKILLS_DIR)
     tools.extend(skill_tools)
@@ -328,7 +331,7 @@ async def run_tool_loop(
             break
 
         tools, registry = build_tools()
-        chunks = stream_chat_completion(base_url, messages, tools, session_id)
+        chunks = stream_chat_completion(base_url, messages, tools, session_id, user_id)
 
         assistant_msg = await consume_stream(chunks, user_id, emit)
         emit(user_id, "assistant", "", False) # send a final empty message so the client knows the end of message.
@@ -359,6 +362,8 @@ async def run_tool_loop(
             assistant_msg_with_ts = {"role": "assistant", "content": text, "timestamp": datetime.now().isoformat()}
             messages.append(assistant_msg_with_ts)
             return text
+
+
 async def handle_message(
     user_input: str,
     base_url: str,
@@ -432,6 +437,15 @@ def init_registry() -> Tuple[Callable[[UserID], list[Message]], Callable[[UserID
 get_user_messages, set_user_messages = init_registry()
 
 
+def reset_session(user_id: UserID = "", session_id: SessionID = ""):
+    "Reset the session and chat history. Provide the Current user_id AND the session id"
+    logger.info(f"Clear session for user_id {user_id}")
+    messages: List[Message] = get_user_messages(user_id)
+    filepath: str = archive_conversation(session_id, messages)
+    set_user_messages(user_id, [])
+    return json.dumps({"status":  f"Message history cleared and archived at {filepath}"})
+
+
 async def main_init(
     resume: bool = False
 ) -> SessionID:
@@ -492,7 +506,7 @@ async def main(
             except KeyboardInterrupt:
                 break
             
-            # load the conversation up it memory once
+            # load the conversation up once hacky TODO
             if resume and not session_resumed:
                 set_user_messages(user_id, read_conversation(session_id))
                 session_resumed = True

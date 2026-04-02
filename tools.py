@@ -33,7 +33,7 @@ def make_tool(
 # ---------------------------------------------------------------------------
 
 
-def run_bash(*, command: str) -> str:
+def run_bash(command: str) -> str:
     """Run a bash command and return its output."""
     try:
         result = subprocess.run(
