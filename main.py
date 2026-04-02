@@ -63,8 +63,6 @@ from tools import (
     make_tool
 )
 
-# Import vector_search and download_model from their modules
-from vector_search import vector_search
 from download_model import download_model, search_model
 
 
@@ -295,13 +293,12 @@ def execute_tool_calls(
 
 def build_tools() -> tuple[list[Tool], dict[str, ToolHandler]]:
     """Build the full tools list and registry by reloading skills from disk."""
-    tools: list[Tool] = [tool_from_function(run_bash), tool_from_function(vector_search), tool_from_function(download_model),
+    tools: list[Tool] = [tool_from_function(run_bash), tool_from_function(download_model),
                            tool_from_function(load_model), tool_from_function(unload_model), 
                            tool_from_function(list_models), tool_from_function(search_model)]
     registry: dict[str, ToolHandler] = {
         "run_bash": run_bash,
-        "vector_search": vector_search,
-        "download_model": download_model,
+                "download_model": download_model,
         "load_model": load_model_and_set,
         "unload_model": unload_model,
         "list_models": list_models,
@@ -469,7 +466,6 @@ async def main_init(
     if resume:
         session_id = get_last_conversation_session_id()
 
-    session_resumed = False
     logger.info(f"Loading model {CURRENT_MODEL}")
     load_model_and_set(CURRENT_MODEL)
     await asyncio.sleep(3)
@@ -482,6 +478,7 @@ async def main(
     session_id = None,
 ) -> None:
     base_url = os.getenv("LLAMA_BASE_URL")
+    session_resumed = False
     try:
         while True:
             try:

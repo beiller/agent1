@@ -31,10 +31,5 @@ tempora==5.8.1
 typer==0.24.1
 typer-slim==0.24.0
 yarl==1.23.0
-joblib==1.5.3
-numpy~=2.2.0
-scikit-learn~=1.7.0
-scipy~=1.15.1
-threadpoolctl==3.6.0
 huggingface_hub==1.7.2
 textual==8.2.0
